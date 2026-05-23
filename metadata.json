@@ -1,0 +1,8 @@
+{
+  "name": "Sabis AI Studio",
+  "description": "Autonomous No-Code Full-Page AI Visual Builder plugin for WordPress using GrapesJS, Gemini, and Tailwind CSS.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
