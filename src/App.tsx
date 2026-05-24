@@ -58,7 +58,8 @@ export default function App() {
   // Configuration State
   const [geminiApiKey, setGeminiApiKey] = useState("");
   const [googleWebhookUrl, setGoogleWebhookUrl] = useState("");
-  const [themePreset, setThemePreset] = useState<"Minimal Light" | "Cyberpunk Dark" | "Royal Gold">("Minimal Light");
+  const [themePreset, setThemePreset] = useState<string>("Minimal Light");
+  const [customThemePresetDescription, setCustomThemePresetDescription] = useState("");
   const [currentLang, setCurrentLang] = useState<"en" | "ur">("en");
 
   // AI Generation Sandbox States
@@ -93,6 +94,7 @@ export default function App() {
 
   // GrapesJS reference
   const editorRef = useRef<any>(null);
+  const syncIntervalRef = useRef<any>(null);
   const [isGjsLoaded, setIsGjsLoaded] = useState(false);
 
   // Toast notifications
@@ -102,12 +104,84 @@ export default function App() {
   const [activeOrderData, setActiveOrderData] = useState<any>(null);
   const [activeLeadEmail, setActiveLeadEmail] = useState<string | null>(null);
 
+  // AI Redesign Modal & Offline Recovery state variables
+  const [isRedesignModalOpen, setIsRedesignModalOpen] = useState(false);
+  const [redesignHtml, setRedesignHtml] = useState("");
+  const [redesignCustomInstruction, setRedesignCustomInstruction] = useState("");
+  const [redesignSelectedModel, setRedesignSelectedModel] = useState<any>(null);
+  const [isRedesigning, setIsRedesigning] = useState(false);
+  const [hasRecoverySession, setHasRecoverySession] = useState(false);
+
+  // Reference Image Upload States
+  const [attachedReferenceImage, setAttachedReferenceImage] = useState<string | null>(null);
+  const [attachedImageName, setAttachedImageName] = useState<string | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+
+  // Multi-Page Selector States
+  const [pageCount, setPageCount] = useState<number>(1);
+  const [selectedTemplates, setSelectedTemplates] = useState<string[]>(["Home"]);
+  const [sabisPages, setSabisPages] = useState<{ title: string; html: string }[]>([]);
+  const [sabisActiveTab, setSabisActiveTab] = useState<string | null>(null);
+
+  // Site Category Preferences
+  const [siteType, setSiteType] = useState<string>("SaaS Landing Page");
+  const [customSiteType, setCustomSiteType] = useState<string>("");
+
+  // Stripe Publishable Key
+  const [stripePublishableKey, setStripePublishableKey] = useState("");
+  const [selectedPageId, setSelectedPageId] = useState<string>("");
+
+  const publishedPagesRef = useRef(publishedPages);
+  useEffect(() => {
+    publishedPagesRef.current = publishedPages;
+  }, [publishedPages]);
+
   const addToast = (title: string, message: string, type: "success" | "info" | "error" = "success") => {
     const id = Date.now();
     setToasts((prev) => [...prev, { id, title, message, type }]);
     setTimeout(() => {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 4500);
+  };
+
+  const handleReactImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (event.target?.result) {
+          setAttachedReferenceImage(event.target.result as string);
+          setAttachedImageName(file.name);
+          addToast("📁 Visual Guideline Saved", "Image loaded into Google Gemini Multimodal Pipeline successfully!", "success");
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleTabSwitch = (targetTitle: string) => {
+    if (!editorRef.current) return;
+    
+    // Save current active tab HTML
+    if (sabisActiveTab) {
+      const currentHTML = editorRef.current.getHtml() || "";
+      const currentCSS = editorRef.current.getCss() || "";
+      const combinedHTML = `<style>${currentCSS}</style>${currentHTML}`;
+      
+      setSabisPages(prev => prev.map(p => {
+        if (p.title === sabisActiveTab) {
+          return { ...p, html: combinedHTML };
+        }
+        return p;
+      }));
+    }
+
+    // Load target tab HTML
+    const targetPage = sabisPages.find(p => p.title === targetTitle);
+    if (targetPage) {
+      setSabisActiveTab(targetTitle);
+      editorRef.current.setComponents(targetPage.html);
+    }
   };
 
   // Synchronize Google Sheets / Webhook settings in LocalStorage
@@ -118,11 +192,37 @@ export default function App() {
     } else {
       setGoogleWebhookUrl("https://script.google.com/macros/s/AKfycbz_sabis_ai_studio_simulation_sheets_webhook/exec");
     }
+
+    const storedStripeKey = localStorage.getItem("sabis_stripe_publishable_key");
+    if (storedStripeKey) {
+      setStripePublishableKey(storedStripeKey);
+    }
+
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("sabis_edit_page")) {
+      setActiveTab("builder");
+    }
   }, []);
 
   // Initialize GrapesJS Visual Editor Core
   useEffect(() => {
     if (activeTab !== "builder") return;
+
+    // Listen to capture-phase clicks/touches on the AI Redesign button to bypass any GrapesJS internal swallows
+    const handleAiRedesignTrigger = (e: any) => {
+      const btn = e.target.closest("#sabis-btn-ai-redesign");
+      if (btn) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log("Intercepting standalone click for AI Redesign...");
+        if (editorRef.current) {
+          editorRef.current.runCommand("regenerate-section-command");
+        }
+      }
+    };
+    
+    document.addEventListener("click", handleAiRedesignTrigger, { capture: true });
+    document.addEventListener("touchstart", handleAiRedesignTrigger, { capture: true });
 
     const initInterval = setInterval(() => {
       if (window.hasOwnProperty("grapesjs")) {
@@ -133,6 +233,12 @@ export default function App() {
 
     return () => {
       clearInterval(initInterval);
+      if (syncIntervalRef.current) {
+        clearInterval(syncIntervalRef.current);
+        syncIntervalRef.current = null;
+      }
+      document.removeEventListener("click", handleAiRedesignTrigger, { capture: true });
+      document.removeEventListener("touchstart", handleAiRedesignTrigger, { capture: true });
       if (editorRef.current) {
         editorRef.current.destroy();
         editorRef.current = null;
@@ -154,6 +260,10 @@ export default function App() {
         height: "640px",
         width: "auto",
         storageManager: false,
+        undoManager: {
+          trackComponents: true,
+          limit: 15
+        },
         showDevices: true,
         deviceManager: {
           devices: [
@@ -257,6 +367,27 @@ export default function App() {
       // Catch right-click (contextmenu) events inside GrapesJS iframe body
       editor.on('canvas:load', function() {
         const canvasBody = editor.Canvas.getBody();
+        const canvasHead = editor.Canvas.getHead();
+        
+        // Inject scroll and responsive canvas container layout protections
+        if (canvasHead) {
+          const styleEl = document.createElement('style');
+          styleEl.innerHTML = `
+            body { 
+              overflow-x: hidden !important; 
+              width: 100% !important; 
+              margin: 0; 
+              padding: 0; 
+              box-sizing: border-box !important; 
+            }
+            * { 
+              box-sizing: border-box !important; 
+              max-width: 100% !important; 
+            }
+          `;
+          canvasHead.appendChild(styleEl);
+        }
+
         if (canvasBody) {
           canvasBody.addEventListener('contextmenu', function(e: any) {
             e.preventDefault();
@@ -305,49 +436,9 @@ export default function App() {
             htmlToRegen = selected.getEl().outerHTML;
           }
           
-          const instruction = prompt("AI Redesign Section:\nEnter layout modification instructions:");
-          if (!instruction) return;
-          
-          addToast("⚡ Redesigning...", "Section-level regeneration active via Gemini 2.5 Pro", "info");
-          
-          try {
-            const selectEl = document.getElementById("sabis-theme-preset") as HTMLSelectElement | null;
-            const tempTheme = selectEl ? selectEl.value : themePreset;
-            const response = await fetch("/api/regenerate_section", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                sectionHtml: htmlToRegen,
-                instruction,
-                themePreset: tempTheme
-              })
-            });
-            
-            if (!response.ok) {
-              throw new Error("Unable to contact section redesign server API");
-            }
-            
-            const result = await response.json();
-            if (result.success && result.html) {
-              const parent = selected.parent();
-              if (parent) {
-                const index = selected.index();
-                parent.append(result.html, { at: index });
-                selected.remove();
-              } else {
-                if (typeof selected.replaceWith === "function") {
-                  selected.replaceWith(result.html);
-                } else {
-                  selected.setComponents(result.html);
-                }
-              }
-              addToast("🟢 Section Updated", "Section redesigned successfully", "success");
-            } else {
-              alert(result.error || "Failed to redesign section.");
-            }
-          } catch (err: any) {
-            alert(err.message || "Error communicating with server.");
-          }
+          setRedesignHtml(htmlToRegen);
+          setRedesignSelectedModel(selected);
+          setIsRedesignModalOpen(true);
         }
       });
 
@@ -515,19 +606,50 @@ export default function App() {
         `
       });
 
-      // Default HTML content structure if none generated yet
-      editor.setComponents(`
-        <section class="max-w-4xl mx-auto py-16 px-6 text-center font-sans bg-zinc-50 border border-zinc-200 rounded-3xl my-8">
-          <span class="text-xs font-bold uppercase text-blue-600 bg-blue-100/50 px-3 py-1 rounded-full mb-4 inline-block tracking-wider">Empty Slate Canvas</span>
-          <h2 class="text-3xl font-black text-zinc-900 mb-3 tracking-tight">Your Visual Studio is Prepped</h2>
-          <p class="text-zinc-500 text-sm max-w-md mx-auto mb-6">
-            Enter a prompt above and speak directly using dynamic voice speech recognition logic, or drag premium elements from the blocks inspector shelf.
-          </p>
-          <div class="flex justify-center gap-3">
-            <span class="text-[11px] font-mono text-zinc-400">Powered by GrapesJS + Tailwind CSS v4</span>
-          </div>
-        </section>
-      `);
+      // Check query parameter for auto-load page ID
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlPageId = urlParams.get("sabis_edit_page");
+      let pageLoaded = false;
+
+      if (urlPageId) {
+        const foundPage = (publishedPagesRef.current || publishedPages).find((p: any) => p.id.toString() === urlPageId.toString());
+        if (foundPage) {
+          let rawHtml = foundPage.content || "";
+          if (rawHtml.includes("sabis-canvas-body-wrap")) {
+            const tempDiv = document.createElement("div");
+            tempDiv.innerHTML = rawHtml;
+            const wrap = tempDiv.querySelector(".sabis-canvas-body-wrap");
+            if (wrap) {
+              const scripts = wrap.querySelectorAll("script");
+              scripts.forEach(s => s.remove());
+              const favicons = wrap.querySelectorAll("link");
+              favicons.forEach(f => f.remove());
+              rawHtml = wrap.innerHTML;
+            }
+          }
+          editor.setComponents(rawHtml);
+          pageLoaded = true;
+          setTimeout(() => {
+            addToast("📥 Page Content Preloaded", `Retrieved '${foundPage.title}' automatically via native Edit query link.`, "success");
+          }, 500);
+        }
+      }
+
+      if (!pageLoaded) {
+        // Default HTML content structure if none generated yet
+        editor.setComponents(`
+          <section class="max-w-4xl mx-auto py-16 px-6 text-center font-sans bg-zinc-50 border border-zinc-200 rounded-3xl my-8">
+            <span class="text-xs font-bold uppercase text-blue-600 bg-blue-100/50 px-3 py-1 rounded-full mb-4 inline-block tracking-wider">Empty Slate Canvas</span>
+            <h2 class="text-3xl font-black text-zinc-900 mb-3 tracking-tight">Your Visual Studio is Prepped</h2>
+            <p class="text-zinc-500 text-sm max-w-md mx-auto mb-6">
+              Enter a prompt above and speak directly using dynamic voice speech recognition logic, or drag premium elements from the blocks inspector shelf.
+            </p>
+            <div class="flex justify-center gap-3">
+              <span class="text-[11px] font-mono text-zinc-400">Powered by GrapesJS + Tailwind CSS v4</span>
+            </div>
+          </section>
+        `);
+      }
 
       // Track highlighted text blocks inside GrapesJS frame for prompt-level micro actions
       editor.on("component:selected", (model: any) => {
@@ -554,9 +676,13 @@ export default function App() {
             id: "regenerate-section",
             command: "regenerate-section-command",
             label: "✨ AI Redesign",
-            attributes: { title: "AI Redesign Section via Gemini 2.5 Pro" }
+            attributes: { 
+              id: "sabis-btn-ai-redesign",
+              title: "AI Redesign Section via Gemini 2.5 Pro" 
+            }
           });
-          model.set("toolbar", toolbar);
+          model.set("toolbar", [...toolbar]);
+          model.trigger("change:toolbar");
         }
       });
 
@@ -577,11 +703,134 @@ export default function App() {
         }
       });
 
+      // 1. TEXT DRAG & DROP MOBILITY ENHANCEMENT
+      editor.on("component:mount", (model: any) => {
+        const type = model.get("type");
+        const tagName = model.get("tagName");
+        const editableTags = ["h1", "h2", "h3", "h4", "h5", "h6", "p", "span", "a", "button"];
+        if (type === "text" || editableTags.includes(tagName)) {
+          model.set({
+            draggable: true,
+            droppable: true
+          });
+        }
+      });
+
+      // 5. OFFLINE STATE HYDRATION & RECOVERY ADDITION
+      const syncInterval = setInterval(() => {
+        try {
+          const activeEditor = editorRef.current;
+          if (activeEditor) {
+            const html = activeEditor.getHtml();
+            const css = activeEditor.getCss();
+            const components = activeEditor.getComponents();
+            const payload = JSON.stringify({ html, css, components });
+            localStorage.setItem("sabis_grapesjs_autosave_payload", payload);
+          }
+        } catch (err) {
+          console.error("Layout cache sync error:", err);
+        }
+      }, 30000);
+      syncIntervalRef.current = syncInterval;
+
       editorRef.current = editor;
       setIsGjsLoaded(true);
 
+      // Check if there is an offline saved session on layout load
+      const storedRecovery = localStorage.getItem("sabis_grapesjs_autosave_payload");
+      if (storedRecovery) {
+        try {
+          const parsed = JSON.parse(storedRecovery);
+          if (parsed && (parsed.html || parsed.components)) {
+            setHasRecoverySession(true);
+          }
+        } catch (e) {
+          console.error("Failed to parse recovery cache payload:", e);
+        }
+      }
+
     } catch (err) {
       console.error("Failed to configure GrapesJS editor:", err);
+    }
+  };
+
+  const handleRestoreSession = () => {
+    const storedRecovery = localStorage.getItem("sabis_grapesjs_autosave_payload");
+    if (storedRecovery && editorRef.current) {
+      try {
+        const parsed = JSON.parse(storedRecovery);
+        if (parsed) {
+          if (parsed.components) {
+            editorRef.current.setComponents(parsed.components);
+          } else if (parsed.html) {
+            editorRef.current.setComponents(parsed.html);
+          }
+          addToast("🔄 Autorecovery Succeeded", "Previous canvas layout has been restored from local storage", "success");
+        }
+      } catch (e) {
+        console.error("Autorecovery parse error:", e);
+      }
+    }
+    setHasRecoverySession(false);
+  };
+
+  const handleSectionRedesign = async (actionType: "custom" | "auto") => {
+    let instruction = "";
+    if (actionType === "custom") {
+      instruction = redesignCustomInstruction;
+    } else {
+      instruction = "Improve design, aesthetic layout, typography, visual spacing, color palettes, and overall structure to follow elite global SaaS design trends.";
+    }
+
+    if (!instruction || !instruction.trim()) return;
+
+    setIsRedesigning(true);
+    addToast("⚡ Redesigning...", "Section-level regeneration active via Gemini 2.5 Pro", "info");
+
+    try {
+      const selectEl = document.getElementById("sabis-theme-preset") as HTMLSelectElement | null;
+      const tempTheme = selectEl ? selectEl.value : themePreset;
+      const response = await fetch("/api/regenerate_section", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sectionHtml: redesignHtml,
+          instruction,
+          themePreset: tempTheme
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error("Unable to contact section redesign server API");
+      }
+
+      const result = await response.json();
+      if (result.success && result.html) {
+        const selected = redesignSelectedModel;
+        if (selected) {
+          const parent = selected.parent();
+          if (parent) {
+            const index = selected.index();
+            parent.append(result.html, { at: index });
+            selected.remove();
+          } else {
+            if (typeof selected.replaceWith === "function") {
+              selected.replaceWith(result.html);
+            } else {
+              selected.setComponents(result.html);
+            }
+          }
+          addToast("🟢 Section Updated", "Section redesigned successfully", "success");
+        }
+        setIsRedesignModalOpen(false);
+        setRedesignCustomInstruction("");
+      } else {
+        alert(result.error || "Failed to redesign section.");
+      }
+    } catch (err: any) {
+      alert(err.message || "Error communicating with server.");
+    } finally {
+      setIsRedesigning(false);
     }
   };
 
@@ -692,10 +941,25 @@ export default function App() {
         setActiveStatusText("🎨 Compiling Tailwind visual blocks...");
       }, 1200);
 
+      // Combine custom website info in prompt
+      let combinedPrompt = userPrompt;
+      const chosenSite = siteType === "Custom Site" ? customSiteType : siteType;
+      if (chosenSite) {
+        combinedPrompt = `Website Category: [ ${chosenSite} ].\n${combinedPrompt}`;
+      }
+
       const response = await fetch("/api/generate_page", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: userPrompt, themePreset }),
+        body: JSON.stringify({ 
+          prompt: combinedPrompt, 
+          themePreset,
+          referenceImage: attachedReferenceImage,
+          pageCount,
+          templates: selectedTemplates,
+          stripeKey: stripePublishableKey,
+          customThemePresetDescription
+        }),
       });
 
       if (!response.ok) {
@@ -720,8 +984,23 @@ export default function App() {
       setGenerationProgress(90);
       setGenerationSteps(prev => [...prev, "Layout resolved", "Sanitizing semantic HTML markup", "Injecting into GrapesJS Frame"]);
 
-      if (editorRef.current && result.html) {
-        // Load generated markup into GrapesJS
+      if (result.pages && Array.isArray(result.pages) && result.pages.length > 0) {
+        setSabisPages(result.pages);
+        setSabisActiveTab(result.pages[0].title);
+        
+        if (editorRef.current) {
+          // Load generated markup of page 1 into GrapesJS
+          editorRef.current.setComponents(result.pages[0].html);
+          applyThemePresetClassesToGrapes();
+        }
+        
+        setGenerationProgress(100);
+        addToast("✨ AI Multi-Pages Synced!", `Successfully generated and compiled ${result.pages.length} pages. Switched editing view to Home layout.`, "success");
+        setActiveStatusText("🟢 AI Multi-Pages Fully Loaded and Synced!");
+      } else if (editorRef.current && result.html) {
+        // Load generated single markup into GrapesJS
+        setSabisPages([{ title: "Home", html: result.html }]);
+        setSabisActiveTab("Home");
         editorRef.current.setComponents(result.html);
         
         // Auto apply theme modifiers
@@ -754,6 +1033,16 @@ export default function App() {
     wrapper.removeClass("text-white");
     wrapper.removeClass("bg-slate-900");
     wrapper.removeClass("text-yellow-100");
+    wrapper.removeClass("bg-[#0e0f11]");
+    wrapper.removeClass("text-orange-400");
+    wrapper.removeClass("bg-[#0a100d]");
+    wrapper.removeClass("text-emerald-400");
+    wrapper.removeClass("bg-[#050b14]");
+    wrapper.removeClass("text-sky-400");
+    wrapper.removeClass("bg-[#121214]");
+    wrapper.removeClass("text-purple-400");
+    wrapper.removeClass("bg-[#0d0d0e]");
+    wrapper.removeClass("text-zinc-100");
 
     if (themePreset === "Minimal Light") {
       wrapper.addClass("bg-zinc-50");
@@ -764,6 +1053,21 @@ export default function App() {
     } else if (themePreset === "Royal Gold") {
       wrapper.addClass("bg-slate-900");
       wrapper.addClass("text-yellow-100");
+    } else if (themePreset === "Sunset Orange & Charcoal") {
+      wrapper.addClass("bg-[#0e0f11]");
+      wrapper.addClass("text-orange-400");
+    } else if (themePreset === "Forest Emerald & Sage") {
+      wrapper.addClass("bg-[#0a100d]");
+      wrapper.addClass("text-emerald-400");
+    } else if (themePreset === "Deep Ocean Blues") {
+      wrapper.addClass("bg-[#050b14]");
+      wrapper.addClass("text-sky-400");
+    } else if (themePreset === "Dracula Vampire") {
+      wrapper.addClass("bg-[#121214]");
+      wrapper.addClass("text-purple-400");
+    } else if (themePreset === "Custom Accent") {
+      wrapper.addClass("bg-[#0d0d0e]");
+      wrapper.addClass("text-zinc-100");
     }
   };
 
@@ -772,10 +1076,10 @@ export default function App() {
     applyThemePresetClassesToGrapes();
   }, [themePreset, isGjsLoaded]);
 
-  // Micro AI Copywriting Wizard for Highlighted Paragraphs/Headers
+  // Micro AI Copywriting Wizard for Highlighted Paragraphs/Headers or Custom Input
   const handleMicroAIEditing = async (action: "Make Catchy" | "Shorten" | "Change Tone") => {
-    if (!selectedText) {
-      addToast("⚠️ No Highlight For Wizard", "Please click any visual text component inside the GrapesJS editor first to select it.", "error");
+    if (!selectedText || !selectedText.trim()) {
+      addToast("⚠️ No Text Specified", "Please type or paste some text inside the Text Improver box below, or select an element inside GrapesJS first.", "error");
       return;
     }
 
@@ -790,16 +1094,20 @@ export default function App() {
       });
 
       if (!response.ok) {
-        throw new Error("Unable to contacts copywriting server API");
+        throw new Error("Unable to contact copywriting server API");
       }
 
       const result = await response.json();
       if (result.error) throw new Error(result.error);
 
-      if (selectedComponentModel && result.text) {
-        selectedComponentModel.setComponents(result.text);
+      if (result.text) {
         setSelectedText(result.text);
-        addToast("⚡ Copy Repainted!", "Gemini copywriting has successfully updated the active element.", "success");
+        if (selectedComponentModel) {
+          selectedComponentModel.setComponents(result.text);
+          addToast("⚡ Copy Repainted!", "Gemini copywriting has successfully updated the active canvas element.", "success");
+        } else {
+          addToast("✨ New Copy Generated!", "The rewritten text is now ready in the Text Improver box below.", "success");
+        }
       }
     } catch (err: any) {
       addToast("❌ Copywriting Failed", err.message || "Micro AJAX request failed", "error");
@@ -857,42 +1165,82 @@ export default function App() {
   const handlePublishPageToServer = async () => {
     if (!editorRef.current) return;
     
-    const finalHTML = editorRef.current.getHtml();
-    const promptTitle = prompt("Provide the WordPress Page Title:", userPrompt ? `AI Generated: ${userPrompt.substring(0, 30)}` : "Sabis Custom AI Layout");
-    
-    if (!promptTitle) return;
+    // Save current active tab HTML to state first
+    if (sabisActiveTab) {
+      const currentHTML = editorRef.current.getHtml() || "";
+      const currentCSS = editorRef.current.getCss() || "";
+      const combinedHTML = `<style>${currentCSS}</style>${currentHTML}`;
+      setSabisPages(prev => prev.map(p => {
+        if (p.title === sabisActiveTab) {
+          return { ...p, html: combinedHTML };
+        }
+        return p;
+      }));
+    }
 
-    addToast("💾 Launching Self-Healing WordPress Publish", "Server is auditing DIV wrappers, processing WebP formats, and inserting post row...", "info");
+    const currentHTML = editorRef.current.getHtml() || "";
+    const currentCSS = editorRef.current.getCss() || "";
+    const finalHTML = `<style>${currentCSS}</style>${currentHTML}`;
+
+    let pagesToPublish = [...sabisPages];
+    
+    if (pagesToPublish.length === 0) {
+      const defaultTitle = userPrompt ? `AI Generated: ${userPrompt.substring(0, 30)}` : "Sabis Custom AI Layout";
+      const promptTitle = prompt("Provide the WordPress Page Title:", defaultTitle);
+      if (!promptTitle) return;
+      pagesToPublish = [{ title: promptTitle, html: finalHTML }];
+    } else {
+      const confirmPublishAll = confirm(`Found ${pagesToPublish.length} customized pages inside our active workspace. Would you like to mass-publish them all simultaneously as independent WordPress page objects?`);
+      if (!confirmPublishAll) {
+        // Just publish active one
+        const activePageName = sabisActiveTab || pagesToPublish[0].title;
+        const promptTitle = prompt("Provide the WordPress Page Title:", activePageName);
+        if (!promptTitle) return;
+        pagesToPublish = [{ title: promptTitle, html: finalHTML }];
+      }
+    }
+
+    addToast("💾 Launching Self-Healing WordPress Publish", `Server is auditing ${pagesToPublish.length} container wrappers, processing WebP formats, and inserting post row...`, "info");
 
     try {
-      const response = await fetch("/api/publish_simulation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ html: finalHTML, title: promptTitle }),
-      });
+      const publishedList: any[] = [];
+      for (const page of pagesToPublish) {
+        let contentToUse = page.html;
+        // If it's the current tab, use fresh content from editor
+        if (page.title === sabisActiveTab) {
+          contentToUse = finalHTML;
+        }
 
-      if (!response.ok) throw new Error("Failed to compile layout server side");
+        const response = await fetch("/api/publish_simulation", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ html: contentToUse, title: page.title }),
+        });
 
-      const result = await response.json();
+        if (!response.ok) throw new Error(`Failed to compile layout for ${page.title} server side`);
 
-      if (result.success) {
-        const newPage = {
-          id: Date.now() % 1000,
-          title: result.title,
-          slug: result.title.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-          theme: themePreset,
-          date: new Date().toISOString().replace("T", " ").substring(0, 16),
-          permalink: result.liveUrl,
-          content: result.healedHtml,
-          audit: result.auditReport
-        };
+        const result = await response.json();
 
-        setPublishedPages((prev) => [newPage, ...prev]);
-        addToast("🎉 WordPress Page Created!", "The page is live and prepped on the visual server routing maps.", "success");
-        
-        // Switch tab to view the live list
-        setActiveTab("pages");
+        if (result.success) {
+          const newPage = {
+            id: (Date.now() + Math.floor(Math.random() * 10000)) % 100000,
+            title: result.title,
+            slug: result.title.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+            theme: themePreset,
+            date: new Date().toISOString().replace("T", " ").substring(0, 16),
+            permalink: result.liveUrl,
+            content: result.healedHtml,
+            audit: result.auditReport
+          };
+          publishedList.push(newPage);
+        }
       }
+
+      setPublishedPages((prev) => [...publishedList, ...prev]);
+      addToast("🎉 WordPress Page(s) Created!", `${pagesToPublish.length} page(s) are live and prepped on the visual server routing maps.`, "success");
+      
+      // Switch tab to view the live list
+      setActiveTab("pages");
     } catch (error: any) {
       addToast("❌ WordPress Publish Failed", error.message || "Simulated page creation error", "error");
     }
@@ -969,15 +1317,53 @@ export default function App() {
           {/* Admin Header Branding */}
           <div className="p-4 border-b border-[#1b1f23] flex items-center justify-between">
             {!isWpSidebarCollapsed ? (
-              <div className="flex items-center gap-2">
-                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-black text-white text-sm shadow-inner transform rotate-3">S</div>
-                <div>
-                  <h4 className="font-bold text-xs tracking-wider text-slate-100 uppercase">Sabis Studio</h4>
-                  <span className="text-[9px] text-blue-400 font-mono tracking-widest font-bold">WP CORE ARCHITECT</span>
+              <div className="flex items-center gap-2.5">
+                {/* World-class Elegant Neural SVG Logo Logo */}
+                <svg className="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(234,179,8,0.35)] flex-shrink-0" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <linearGradient id="sabisGoldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#FACC15" />
+                      <stop offset="50%" stopColor="#EAB308" />
+                      <stop offset="100%" stopColor="#CA8A04" />
+                    </linearGradient>
+                    <linearGradient id="sabisGlowNeon" x1="0%" y1="100%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#10B981" />
+                      <stop offset="100%" stopColor="#3B82F6" />
+                    </linearGradient>
+                  </defs>
+                  <circle cx="50" cy="50" r="42" stroke="url(#sabisGoldGrad)" strokeWidth="2.5" strokeDasharray="4 4" opacity="0.65" />
+                  <circle cx="50" cy="50" r="34" stroke="url(#sabisGlowNeon)" strokeWidth="1.5" opacity="0.4" />
+                  <polygon points="50,18 78,35 78,65 50,82 22,65 22,35" stroke="url(#sabisGoldGrad)" strokeWidth="1" strokeLinecap="round" fill="rgba(15, 23, 42, 0.45)" />
+                  <path d="M42 38 C42 32, 58 32, 58 38 C58 43, 42 45, 42 50 C42 55, 58 55, 58 50" stroke="url(#sabisGoldGrad)" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <circle cx="50" cy="50" r="2.5" fill="#FACC15" />
+                  <circle cx="22" cy="35" r="2" fill="#3B82F6" />
+                  <circle cx="78" cy="35" r="2" fill="#10B981" />
+                  <circle cx="50" cy="82" r="2" fill="#FACC15" />
+                </svg>
+                <div className="flex flex-col">
+                  <h4 className="font-extrabold text-xs tracking-wider text-yellow-400 uppercase">Sabis Studio</h4>
+                  <span className="text-[8px] text-zinc-400 font-mono tracking-widest font-bold">WP CORE ARCHITECT</span>
                 </div>
               </div>
             ) : (
-              <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-black text-white mx-auto text-sm">S</div>
+              <div className="mx-auto">
+                <svg className="w-8 h-8 filter drop-shadow-[0_0_8px_rgba(234,179,8,0.35)]" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <linearGradient id="sabisGoldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#FACC15" />
+                      <stop offset="50%" stopColor="#EAB308" />
+                      <stop offset="100%" stopColor="#CA8A04" />
+                    </linearGradient>
+                    <linearGradient id="sabisGlowNeon" x1="0%" y1="100%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#10B981" />
+                      <stop offset="100%" stopColor="#3B82F6" />
+                    </linearGradient>
+                  </defs>
+                  <circle cx="50" cy="50" r="42" stroke="url(#sabisGoldGrad)" strokeWidth="2.5" strokeDasharray="4 4" opacity="0.65" />
+                  <polygon points="50,18 78,35 78,65 50,82 22,65 22,35" stroke="url(#sabisGoldGrad)" strokeWidth="1" strokeLinecap="round" fill="rgba(15, 23, 42, 0.45)" />
+                  <path d="M42 38 C42 32, 58 32, 58 38 C58 43, 42 45, 42 50 C42 55, 58 55, 58 50" stroke="url(#sabisGoldGrad)" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </div>
             )}
           </div>
  
@@ -1041,7 +1427,7 @@ export default function App() {
       </aside>
  
       {/* Main Workspace Frame */}
-      <main className={`flex-1 transition-all duration-300 pt-14 pb-12 px-4 md:px-8 ${isWpSidebarCollapsed ? "md:pl-20" : "md:pl-72"}`}>
+      <main className={`flex-1 min-w-0 max-w-full overflow-x-hidden transition-all duration-300 pt-14 pb-12 px-3 xs:px-4 md:px-8 ${isWpSidebarCollapsed ? "md:pl-20" : "md:pl-72"}`}>
         
         {/* Custom Header with responsive mobile menu tabs */}
         <div className="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#2d2d2d] pb-6">
@@ -1057,20 +1443,45 @@ export default function App() {
                 <span className="text-lg leading-none">☰</span>
               </button>
               
-              <div>
-                <div className="flex items-center gap-3 mb-1">
-                  <span className="px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-400 text-[9px] sm:text-[10px] font-mono tracking-widest uppercase font-semibold border border-blue-500/20">
-                    100% Autonomous SaaS Design
-                  </span>
-                  <span className="text-[11px] text-[#8a919e] font-sans hidden sm:inline">
-                    🕒 System Sync: 2026-05-23
-                  </span>
+              <div className="flex items-center gap-4">
+                {/* World-class Elegant Neural SVG Logo Logo */}
+                <svg className="w-10 h-10 filter drop-shadow-[0_0_12px_rgba(234,179,8,0.4)] flex-shrink-0 hidden xs:block" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <linearGradient id="sabisGoldMain" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor="#FDE047" />
+                      <stop offset="50%" stopColor="#EAB308" />
+                      <stop offset="100%" stopColor="#854D0E" />
+                    </linearGradient>
+                    <linearGradient id="sabisGlowNeonMain" x1="0%" y1="100%" x2="100%" y2="0%">
+                      <stop offset="0%" stopColor="#34D399" />
+                      <stop offset="100%" stopColor="#60A5FA" />
+                    </linearGradient>
+                  </defs>
+                  <circle cx="50" cy="50" r="44" stroke="url(#sabisGoldMain)" strokeWidth="3" strokeDasharray="5 5" opacity="0.8" />
+                  <circle cx="50" cy="50" r="35" stroke="url(#sabisGlowNeonMain)" strokeWidth="1.5" opacity="0.5" />
+                  <polygon points="50,15 82,33 82,67 50,85 18,67 18,33" stroke="url(#sabisGoldMain)" strokeWidth="1.5" strokeLinecap="round" fill="rgba(11, 15, 25, 0.6)" />
+                  <path d="M40 38 C40 31, 60 31, 60 38 C60 44, 40 46, 40 52 C40 59, 60 59, 60 52" stroke="url(#sabisGoldMain)" strokeWidth="5.5" strokeLinecap="round" strokeLinejoin="round" />
+                  <circle cx="50" cy="50" r="3" fill="#FACC15" />
+                  <circle cx="18" cy="33" r="2.5" fill="#3B82F6" />
+                  <circle cx="82" cy="33" r="2.5" fill="#10B981" />
+                  <circle cx="50" cy="85" r="2.5" fill="#FACC15" />
+                </svg>
+
+                <div>
+                  <div className="flex items-center gap-3 mb-1">
+                    <span className="px-2 py-0.5 rounded-full bg-yellow-500/10 text-yellow-500 text-[9px] sm:text-[10px] font-mono tracking-widest uppercase font-semibold border border-yellow-500/20">
+                      👑 WORLD'S BEST WP builder
+                    </span>
+                    <span className="text-[11px] text-[#8a919e] font-sans hidden sm:inline">
+                      🕒 System Sync: 2026-05-24
+                    </span>
+                  </div>
+                  
+                  <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight text-white flex flex-wrap items-center gap-2">
+                    Sabis AI Studio
+                    <span className="text-[9px] sm:text-xs font-mono font-normal text-yellow-400 px-2.5 py-0.5 bg-yellow-950/30 rounded border border-yellow-900/30">Ultimate Professional v2.0</span>
+                  </h1>
                 </div>
-                
-                <h1 className="text-xl sm:text-2xl md:text-3xl font-extrabold tracking-tight text-white flex flex-wrap items-center gap-2">
-                  Sabis AI Studio
-                  <span className="text-[9px] sm:text-xs font-mono font-normal text-slate-400 px-2 py-0.5 bg-zinc-800 rounded border border-zinc-700">No-Code Full-Page Builder</span>
-                </h1>
               </div>
             </div>
 
@@ -1133,13 +1544,13 @@ export default function App() {
             <div className="p-6 bg-[#1a1c1e] rounded-2xl border border-[#2d3135] shadow-lg relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl -z-10"></div>
               
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-sm font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
-                  <Wand2 className="w-4 h-4 text-blue-400" />
-                  Gemini Generation Pipeline Voice & Text Console
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                <h3 className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-300 flex flex-wrap items-center gap-1.5">
+                  <Wand2 className="w-4 h-4 text-blue-400 flex-shrink-0" />
+                  <span>Gemini Generation Pipeline Voice & Text Console</span>
                 </h3>
                 
-                <span className="text-[11px] font-mono text-[#6c727e]">Model Target: <strong className="text-slate-200 bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-700">gemini-3.5-flash</strong></span>
+                <span className="text-[11px] font-mono text-[#6c727e] flex-shrink-0">Model Target: <strong className="text-slate-200 bg-zinc-800 px-1.5 py-0.5 rounded border border-zinc-700">gemini-3.5-flash</strong></span>
               </div>
 
               {/* Dynamic Interactive Input Container with Voice and Text sending capabilities */}
@@ -1148,7 +1559,7 @@ export default function App() {
                   value={userPrompt}
                   onChange={(e) => setUserPrompt(e.target.value)}
                   placeholder="Type a design layout blueprint, or click the mic button to speak your design prompt directly! E.g., 'Modern coffee shop layout, bold display headings, dynamic service grids, premium golden and emerald theme accents.'" 
-                  className="w-full bg-[#111] border border-[#3e444b] rounded-xl py-3 pl-4 pr-28 text-sm text-slate-100 placeholder-slate-500 h-24 focus:outline-none focus:border-blue-500 transition-colors"
+                  className="w-full bg-[#111] border border-[#3e444b] rounded-xl py-3 pl-4 pr-36 text-sm text-slate-100 placeholder-slate-500 h-24 focus:outline-none focus:border-blue-500 transition-colors"
                   onKeyDown={(e) => {
                     // Quick keyboard command send trigger for PC/Mac users
                     if (e.key === "Enter" && !e.shiftKey) {
@@ -1159,6 +1570,25 @@ export default function App() {
                 />
 
                 <div className="absolute right-3 bottom-3 flex items-center gap-2">
+                  {/* Reference Image File Input Trigger */}
+                  <input 
+                    type="file" 
+                    id="react-sabis-reference-image" 
+                    accept="image/*" 
+                    className="hidden" 
+                    onChange={handleReactImageUpload} 
+                    ref={imageInputRef}
+                  />
+                  <button 
+                    type="button" 
+                    onClick={() => imageInputRef.current?.click()} 
+                    className={`p-2.5 rounded-lg transition-all duration-300 hover:scale-105 active:scale-95 flex items-center gap-1 text-xs font-bold ${attachedReferenceImage ? "bg-cyan-600 text-white" : "bg-zinc-805 text-zinc-300 hover:bg-zinc-700 hover:text-white"}`}
+                    title={attachedImageName ? `Attached ref: ${attachedImageName}` : "Upload Reference Screenshot/Layout Image to guide visual aesthetics"}
+                  >
+                    <span>📁</span>
+                    <span>{attachedImageName ? "Attached" : "Reference Image"}</span>
+                  </button>
+
                   {/* Voice Toggle Option */}
                   <button 
                     type="button" 
@@ -1191,21 +1621,186 @@ export default function App() {
                 </div>
               </div>
 
+              {/* SABIS DELUXE MULTI-PAGE & SITE TYPE CONFIGURATION OPTIONS GRID */}
+              <div className="bg-[#111315]/85 border border-zinc-800/60 rounded-xl p-4 mb-4 flex flex-col gap-4 text-slate-300">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Website / Site Type with Expanded Options */}
+                  <div className="flex flex-col gap-1.5 col-span-1">
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Website Custom Design Role / Category</label>
+                    <select
+                      value={siteType}
+                      onChange={(e) => {
+                        setSiteType(e.target.value);
+                        if (e.target.value !== "Custom Site") {
+                          setCustomSiteType("");
+                        }
+                      }}
+                      className="bg-[#1a1c1e] border border-zinc-800 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors cursor-pointer"
+                    >
+                      <option value="SaaS Landing Page">🚀 SaaS Landing Page</option>
+                      <option value="E-Commerce Shop">🛒 E-Commerce Shop</option>
+                      <option value="Corporate Agency">🏢 Corporate Agency</option>
+                      <option value="Dental Clinic">🩺 Healthcare & Dental Clinic</option>
+                      <option value="Restaurant with Menu">🍕 Restaurant & Gastronomy</option>
+                      <option value="Personal Portfolio">🎨 Professional & Personal Portfolio</option>
+                      <option value="Real Estate Directory">🏠 Real Estate Directory</option>
+                      <option value="Custom Site">✒️ Custom Site Concept (Type below)</option>
+                    </select>
+                  </div>
+
+                  {/* Custom site type text box shown optionally */}
+                  {siteType === "Custom Site" && (
+                    <div className="flex flex-col gap-1.5 md:col-span-1">
+                      <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Define Custom Site Concept</label>
+                      <input
+                        type="text"
+                        value={customSiteType}
+                        onChange={(e) => setCustomSiteType(e.target.value)}
+                        placeholder="e.g. Organic Herbal Tea Store, Golden Accents"
+                        className="bg-[#1a1c1e] border border-zinc-800 rounded-lg p-2 text-xs text-white placeholder-zinc-600 focus:outline-none focus:border-blue-500 transition-colors"
+                      />
+                    </div>
+                  )}
+
+                  {/* Page Count Dropdown selector */}
+                  <div className={`flex flex-col gap-1.5 ${siteType === "Custom Site" ? "col-span-1" : "col-span-2"}`}>
+                    <label className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Pages Count Multiplier</label>
+                    <select
+                      value={pageCount}
+                      onChange={(e) => setPageCount(parseInt(e.target.value))}
+                      className="bg-[#1a1c1e] border border-zinc-800 rounded-lg p-2 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors cursor-pointer w-full md:w-32"
+                    >
+                      <option value="1">1 Page</option>
+                      <option value="2">2 Pages</option>
+                      <option value="3">3 Pages</option>
+                      <option value="4">4 Pages</option>
+                      <option value="5">5 Pages</option>
+                      <option value="6">6 Pages</option>
+                      <option value="7">7 Pages</option>
+                      <option value="8">8 Pages</option>
+                      <option value="9">9 Pages</option>
+                      <option value="10">10 Pages</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Checked checkboxes selector */}
+                <div className="flex flex-col gap-2 pt-2 border-t border-zinc-900">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">Select Included Page Layout Modules:</span>
+                  <div className="flex flex-wrap gap-x-5 gap-y-2 text-xs">
+                    {["Home", "About Us", "Services", "Product Landing", "Product Specs", "Pricing Plans", "Testimonials", "FAQs", "Contact", "Custom Page"].map((template) => {
+                      const isChecked = selectedTemplates.includes(template);
+                      return (
+                        <label key={template} className="inline-flex items-center gap-2 cursor-pointer select-none text-slate-300 hover:text-white">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              if (isChecked) {
+                                setSelectedTemplates(prev => prev.filter(t => t !== template));
+                              } else {
+                                setSelectedTemplates(prev => [...prev, template]);
+                              }
+                            }}
+                            className="rounded bg-[#1a1c1e] border-zinc-800 text-blue-500 focus:ring-blue-500/30 font-bold h-4 w-4"
+                          />
+                          <span>{template}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Existing Page Re-designer Addition Panel */}
+                <div className="flex flex-col gap-2 pt-3 border-t border-zinc-900">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex flex-col xs:flex-row xs:items-center gap-2 bg-[#111] px-3 py-1.5 rounded-xl border border-zinc-850 w-full xs:w-auto">
+                      <span className="text-xs text-indigo-300 font-bold flex items-center gap-1 whitespace-nowrap">🔄 Select Existing Page to Re-design:</span>
+                      <select 
+                        value={selectedPageId}
+                        onChange={(e) => setSelectedPageId(e.target.value)}
+                        className="text-xs font-bold text-white bg-transparent border-none focus:outline-none cursor-pointer w-full xs:w-auto py-1 xs:py-0"
+                      >
+                        <option value="" className="bg-[#111] text-zinc-500">-- Choose Published Page --</option>
+                        {publishedPages.map((page) => (
+                          <option key={page.id} value={page.id} className="bg-[#111] text-white">
+                            {page.title} (#{page.id})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!selectedPageId) {
+                          alert("Please select a page from the dropdown first.");
+                          return;
+                        }
+                        const targetPage = publishedPages.find(p => p.id.toString() === selectedPageId.toString());
+                        if (targetPage && editorRef.current) {
+                          addToast("📥 Loading Layout...", `Fetching page '${targetPage.title}' content...`, "info");
+                          
+                          let rawHtml = targetPage.content || "";
+                          if (rawHtml.includes("sabis-canvas-body-wrap")) {
+                            const tempDiv = document.createElement("div");
+                            tempDiv.innerHTML = rawHtml;
+                            const wrap = tempDiv.querySelector(".sabis-canvas-body-wrap");
+                            if (wrap) {
+                              const tailwinds = wrap.querySelectorAll("script");
+                              tailwinds.forEach(t => t.remove());
+                              rawHtml = wrap.innerHTML;
+                            }
+                          }
+                          
+                          editorRef.current.setComponents(rawHtml);
+                          addToast("🟢 Layout Synchronized", "Successfully loaded existing page HTML into the visual editor canvas", "success");
+                        }
+                      }}
+                      className="py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition active:scale-95 flex items-center gap-1.5 shadow"
+                    >
+                      <span>📥 Load Page into Studio</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               {/* Action Rows */}
               <div className="flex flex-wrap items-center justify-between gap-4 pt-3 border-t border-[#292e33]">
                 <div className="flex flex-wrap items-center gap-3 w-full lg:w-auto">
                   {/* Theme Presets Switcher Inside Active Controller shelf */}
-                  <div className="flex items-center gap-2 bg-[#111] px-3 py-1.5 rounded-xl border border-zinc-850">
-                    <span className="text-xs text-zinc-400">Layout Accent:</span>
-                    <select 
-                      value={themePreset} 
-                      onChange={(e) => setThemePreset(e.target.value as any)}
-                      className="text-xs font-bold text-white bg-transparent border-none focus:outline-none cursor-pointer"
-                    >
-                      <option value="Minimal Light" className="bg-[#111] text-white">Minimal Light</option>
-                      <option value="Cyberpunk Dark" className="bg-[#111] text-cyan-400">Cyberpunk Dark</option>
-                      <option value="Royal Gold" className="bg-[#111] text-yellow-300">Royal Gold</option>
-                    </select>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-2 bg-[#111] px-3 py-1.5 rounded-xl border border-zinc-850">
+                      <span className="text-xs text-zinc-400">Layout Accent:</span>
+                      <select 
+                        value={themePreset} 
+                        onChange={(e) => {
+                          setThemePreset(e.target.value);
+                          if (e.target.value !== "Custom Accent") {
+                            setCustomThemePresetDescription("");
+                          }
+                        }}
+                        className="text-xs font-bold text-white bg-transparent border-none focus:outline-none cursor-pointer"
+                      >
+                        <option value="Minimal Light" className="bg-[#111] text-white">Classic Minimal Light</option>
+                        <option value="Cyberpunk Dark" className="bg-[#111] text-cyan-400">Cyberpunk Dark Neon</option>
+                        <option value="Royal Gold" className="bg-[#111] text-yellow-300">Opulent Royal Gold</option>
+                        <option value="Sunset Orange & Charcoal" className="bg-[#111] text-orange-400">Sunset Orange & Charcoal</option>
+                        <option value="Forest Emerald & Sage" className="bg-[#111] text-emerald-400">Forest Emerald & Sage</option>
+                        <option value="Deep Ocean Blues" className="bg-[#111] text-sky-450">Deep Ocean Blues</option>
+                        <option value="Dracula Vampire" className="bg-[#111] text-purple-400">Dracula Vampire Retro</option>
+                        <option value="Custom Accent" className="bg-[#111] text-pink-400">✒️ Custom Accent Profile...</option>
+                      </select>
+                    </div>
+
+                    {themePreset === "Custom Accent" && (
+                      <input 
+                        type="text"
+                        value={customThemePresetDescription}
+                        onChange={(e) => setCustomThemePresetDescription(e.target.value)}
+                        placeholder="Define custom style, e.g. Pastel Pink, light mode, elegant"
+                        className="bg-[#111] border border-zinc-800 rounded-xl px-3 py-1.5 text-xs text-slate-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500 transition-colors w-72"
+                      />
+                    )}
                   </div>
 
                   {/* Urdu/English Translation Direct Alignment Triggers */}
@@ -1285,7 +1880,41 @@ export default function App() {
                   <span className="text-[10px] text-zinc-400 px-2 py-0.5 bg-[#111] rounded border border-zinc-800">100% Drag-and-Drop Sandbox</span>
                 </div>
                 
-                <div className="flex items-center justify-between gap-4 w-full lg:w-auto">
+                <div className="flex flex-wrap items-center justify-between gap-4 w-full lg:w-auto">
+                  {/* LOCAL REVISION HISTORY & WORKSPACE ROLLBACK BUTTONS */}
+                  <div className="flex items-center bg-[#111] border border-zinc-800 p-0.5 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editorRef.current) {
+                          editorRef.current.UndoManager.undo();
+                          addToast("↩️ Undo", "Reverted previous canvas action", "info");
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-all duration-200 active:scale-95"
+                      title="Undo Previous Action (↩️)"
+                      id="undo-canvas-action"
+                    >
+                      <span>↩️</span>
+                      <span>Undo</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (editorRef.current) {
+                          editorRef.current.UndoManager.redo();
+                          addToast("↪️ Redo", "Restored the last undone layout change", "info");
+                        }
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800/60 transition-all duration-200 active:scale-95"
+                      title="Redo Next Action (↪️)"
+                      id="redo-canvas-action"
+                    >
+                      <span>↪️</span>
+                      <span>Redo</span>
+                    </button>
+                  </div>
+
                   {/* Real-time Multi-device Viewport Switcher */}
                   <div className="flex items-center gap-1">
                     <span className="text-[11px] text-zinc-400 mr-2 uppercase tracking-wider font-mono hidden sm:inline">Viewport Preview:</span>
@@ -1295,16 +1924,21 @@ export default function App() {
                         onClick={() => {
                           if (editorRef.current) {
                             editorRef.current.setDevice("desktop");
+                            const frameEl = document.querySelector(".gjs-frame") as HTMLElement;
+                            if (frameEl) {
+                              frameEl.style.width = "100%";
+                              frameEl.style.maxWidth = "100%";
+                            }
                             setCurrentDevice("Desktop");
                             addToast("🖥️ Viewport Mode: Laptop", "Simulating full standard laptop screen widths", "info");
                           }
                         }}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all duration-200 active:scale-95 ${
                           currentDevice === "Desktop"
                             ? "bg-blue-600 text-white shadow"
                             : "text-zinc-400 hover:text-slate-100"
                         }`}
-                        title="Simulate Laptop / Computer Desktop Canvas"
+                        title="Simulate Laptop / PC Desktop Canvas"
                         id="viewport-button-desktop"
                       >
                         <Monitor className="w-3.5 h-3.5" />
@@ -1316,11 +1950,17 @@ export default function App() {
                         onClick={() => {
                           if (editorRef.current) {
                             editorRef.current.setDevice("tablet");
+                            const frameEl = document.querySelector(".gjs-frame") as HTMLElement;
+                            if (frameEl) {
+                              frameEl.style.width = "768px";
+                              frameEl.style.maxWidth = "100%";
+                              frameEl.style.margin = "0 auto";
+                            }
                             setCurrentDevice("Tablet");
                             addToast("📟 Viewport Mode: Tablet", "Simulating standard iPad and slate devices", "info");
                           }
                         }}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all duration-200 active:scale-95 ${
                           currentDevice === "Tablet"
                             ? "bg-blue-600 text-white shadow"
                             : "text-zinc-400 hover:text-slate-100"
@@ -1337,11 +1977,17 @@ export default function App() {
                         onClick={() => {
                           if (editorRef.current) {
                             editorRef.current.setDevice("mobile");
+                            const frameEl = document.querySelector(".gjs-frame") as HTMLElement;
+                            if (frameEl) {
+                              frameEl.style.width = "375px";
+                              frameEl.style.maxWidth = "100%";
+                              frameEl.style.margin = "0 auto";
+                            }
                             setCurrentDevice("Mobile");
                             addToast("📱 Viewport Mode: Mobile", "Simulating responsive smartphone layouts", "info");
                           }
                         }}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${
+                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all duration-200 active:scale-95 ${
                           currentDevice === "Mobile"
                             ? "bg-blue-600 text-white shadow"
                             : "text-zinc-400 hover:text-slate-100"
@@ -1375,59 +2021,208 @@ export default function App() {
                 )}
               </div>
 
+              {/* SABIS DYNAMIC WORKSPACE PAGE TAB MANAGER */}
+              {sabisPages.length > 0 && (
+                <div className="flex items-center gap-2 bg-[#1b1c1e] px-4 py-2 border-b border-[#2d3135] overflow-x-auto select-none" id="sabis-tab-manager-container">
+                  <div className="flex items-center gap-1 text-[10px] font-bold text-zinc-500 uppercase tracking-widest mr-2 flex-shrink-0">
+                    <span className="w-1.5 h-1.5 bg-cyan-400 rounded-full animate-pulse"></span>
+                    <span>Workspace Pages:</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {sabisPages.map((page) => {
+                      const isActive = sabisActiveTab === page.title;
+                      return (
+                        <button
+                          key={page.title}
+                          type="button"
+                          onClick={() => handleTabSwitch(page.title)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all duration-200 flex items-center gap-1.5 border active:scale-95 ${
+                            isActive
+                              ? "bg-blue-600 text-white border-blue-500 shadow-md"
+                              : "bg-[#111] hover:bg-zinc-800 text-zinc-400 border-zinc-800 hover:text-slate-100"
+                          }`}
+                        >
+                          <span>📄</span>
+                          <span>{page.title}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
               {/* CORE VISUAL EDITOR EMBED */}
               <div className="relative">
+                {hasRecoverySession && (
+                  <div className="bg-amber-950/40 border border-amber-900/60 p-4 rounded-xl mb-3 flex flex-col sm:flex-row items-center justify-between gap-3 animate-fade-in" id="sabis-recovery-alert-bar">
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xl">⚠️</span>
+                      <div className="text-left">
+                        <h4 className="text-xs font-bold text-amber-200">Unsaved Canvas Layout Recovered!</h4>
+                        <p className="text-[10px] text-amber-400">We detected an auto-saved session version cached before your last tab reload.</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleRestoreSession}
+                        className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-amber-600 hover:bg-amber-500 text-black transition active:scale-95"
+                      >
+                        🔄 Restore Session
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          localStorage.removeItem("sabis_grapesjs_autosave_payload");
+                          setHasRecoverySession(false);
+                        }}
+                        className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-transparent hover:bg-zinc-800 text-zinc-400 transition"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                )}
                 <div id="gjs-wrapper" className="bg-white min-h-[640px] text-slate-900"></div>
               </div>
+
+              {/* 2. INTERACTIVE AI REDESIGN DIALOG WITH CUSTOM & AUTO MODE */}
+              {isRedesignModalOpen && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-[99999] p-4 animate-fade-in" id="sabis-redesign-modal-overlay">
+                  <div className="bg-[#181a1d] border border-blue-900/40 rounded-2xl w-full max-w-lg p-6 shadow-2xl relative space-y-4" id="sabis-redesign-modal-container">
+                    <div className="flex items-center justify-between border-b border-zinc-900 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
+                        <h3 className="text-sm font-black uppercase tracking-wider text-slate-100">
+                          ✨ Section Re-Architect Wizard
+                        </h3>
+                      </div>
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          setIsRedesignModalOpen(false);
+                          setRedesignCustomInstruction("");
+                        }}
+                        className="text-zinc-500 hover:text-white transition-colors text-lg"
+                      >
+                        &times;
+                      </button>
+                    </div>
+
+                    <div className="text-xs text-zinc-400 space-y-2">
+                      <p>You are about to re-architect and redesign the selected canvas section via Gemini 2.5 Pro.</p>
+                      {redesignSelectedModel && (
+                        <div className="bg-zinc-950/50 p-2 rounded-xl border border-zinc-900 font-mono text-[10px] text-zinc-500">
+                          Selected Component Tag: <span className="text-blue-400 font-bold">{redesignSelectedModel.get("tagName") || "DIV"}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Option A: Custom Instruction */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-slate-300">Option A: Custom Blueprint Instruction</label>
+                      <textarea
+                        value={redesignCustomInstruction}
+                        onChange={(e) => setRedesignCustomInstruction(e.target.value)}
+                        placeholder="e.g. Redesign with a dark violet theme and 3-column pricing cards..."
+                        className="w-full h-20 p-3 rounded-xl bg-zinc-950 border border-zinc-805 text-slate-200 text-xs focus:outline-none focus:border-blue-500 transition-colors placeholder-zinc-700 resize-none font-sans"
+                        id="sabis-redesign-custom-prompt"
+                      />
+                    </div>
+
+                    {/* Actions Grid */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                      <button
+                        type="button"
+                        disabled={!redesignCustomInstruction.trim() || isRedesigning}
+                        onClick={() => handleSectionRedesign("custom")}
+                        className="py-2.5 px-4 rounded-xl text-xs font-bold bg-blue-700 hover:bg-blue-600 disabled:opacity-40 disabled:hover:bg-blue-700 text-white transition active:scale-95 shadow-md flex items-center justify-center gap-1.5"
+                      >
+                        <span>🚀</span> <span>Submit Custom Blueprint</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={isRedesigning}
+                        onClick={() => handleSectionRedesign("auto")}
+                        className="py-2.5 px-4 rounded-xl text-xs font-bold bg-zinc-800 hover:bg-zinc-700 hover:text-white border border-zinc-700 hover:border-blue-500/50 text-[#f1f1f1] transition active:scale-95 flex items-center justify-center gap-1.5"
+                      >
+                        <span>✨</span> <span>Let AI Decide (Auto Mode)</span>
+                      </button>
+                    </div>
+
+                    {isRedesigning && (
+                      <div className="flex items-center justify-center gap-2 pt-2 text-xs text-blue-400 font-mono animate-pulse">
+                        <span className="w-2 h-2 rounded-full bg-blue-500 animate-ping"></span>
+                        Processing layout rendering blocks via Gemini 2.5 Pro...
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* 3. GEMINI CORE COPYWRITING DRAWER FOR MULTI-SELECTION MICRO-HOOKS */}
-            <div className={`p-5 rounded-2xl border transition-all duration-300 ${selectedText ? "bg-[#111315] border-blue-950" : "bg-zinc-900/30 border-zinc-800 opacity-60 pointer-events-none"}`}>
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-300">
+            <div className="p-5 rounded-2xl border transition-all duration-300 bg-[#111315] border-blue-950/40 shadow-xl space-y-4" id="sabis-copywriting-interactive-panel">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></span>
+                    <h3 className="text-xs font-black uppercase tracking-wider text-slate-200">
                       💎 Interactive Copywriting & Text Improver (Sabis Core Context Menu)
                     </h3>
                   </div>
-                  {selectedText ? (
-                    <div className="p-3 bg-zinc-950 border border-zinc-800 rounded-xl text-xs text-slate-300 max-h-16 overflow-y-auto leading-relaxed">
-                      Highlighted Text String: <strong className="text-white">"{selectedText}"</strong>
-                    </div>
-                  ) : (
-                    <p className="text-xs text-zinc-500 leading-relaxed font-sans">
-                      Select any text header, subtitle, list element or list head inside the visual GrapesJS builder to enable Gemini real-time copy rewrites.
-                    </p>
+                  {selectedComponentModel && (
+                    <span className="text-[10px] text-emerald-400 font-mono bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-900/50">
+                      ✓ Connected to Canvas Element: {selectedComponentModel.get("tagName")}
+                    </span>
                   )}
                 </div>
+                
+                <p className="text-xs text-zinc-400 leading-relaxed font-sans">
+                  Select any text element (heading, title, paragraph) inside GrapesJS above to pre-fill, or <strong>write and edit your custom copywriting freeform directly inside the input field below</strong> to improve it instantly:
+                </p>
 
-                <div className="flex items-center gap-2">
+                <textarea
+                  value={selectedText}
+                  onChange={(e) => setSelectedText(e.target.value)}
+                  placeholder="Click a text element inside the builder above, or write / paste your own custom text copy here to improve..."
+                  className="w-full h-24 p-3 rounded-xl bg-zinc-950 border border-zinc-800 text-slate-200 text-xs focus:outline-none focus:border-blue-500 transition-colors placeholder-zinc-650 resize-none font-sans"
+                  id="sabis-text-improver-textarea"
+                />
+              </div>
+
+              <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-zinc-900">
+                <div className="text-[10px] text-zinc-500 font-mono">
+                  {selectedText ? selectedText.length : 0} characters
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
                   <button 
                     type="button" 
                     onClick={() => handleMicroAIEditing("Make Catchy")}
-                    disabled={!selectedText || isRewriting}
-                    className="py-2 px-4 rounded-xl text-xs font-bold bg-zinc-800 hover:bg-zinc-700 hover:text-white border border-zinc-700 hover:border-blue-500/50 text-[#f1f1f1] transition active:scale-95"
+                    disabled={!selectedText || !selectedText.trim() || isRewriting}
+                    className="py-2 px-4 rounded-xl text-xs font-bold bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-zinc-800 hover:text-white border border-zinc-700 hover:border-blue-500/50 text-[#f1f1f1] transition active:scale-95 flex items-center gap-1.5"
                   >
-                    ⚡ Make Catchy Headline
+                    <span>⚡</span> <span>Make Catchy Headline</span>
                   </button>
 
                   <button 
                     type="button" 
                     onClick={() => handleMicroAIEditing("Shorten")}
-                    disabled={!selectedText || isRewriting}
-                    className="py-2 px-4 rounded-xl text-xs font-bold bg-zinc-800 hover:bg-zinc-700 hover:text-white border border-zinc-700 hover:border-yellow-500/50 text-[#f1f1f1] transition active:scale-95"
+                    disabled={!selectedText || !selectedText.trim() || isRewriting}
+                    className="py-2 px-4 rounded-xl text-xs font-bold bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 disabled:hover:bg-zinc-800 hover:text-white border border-zinc-700 hover:border-yellow-500/50 text-[#f1f1f1] transition active:scale-95 flex items-center gap-1.5"
                   >
-                    ✂️ Condense / Shorten
+                    <span>✂️</span> <span>Condense / Shorten</span>
                   </button>
 
                   <button 
                     type="button" 
                     onClick={() => handleMicroAIEditing("Change Tone")}
-                    disabled={!selectedText || isRewriting}
-                    className="py-2 px-4 rounded-xl text-xs font-bold bg-blue-650 hover:bg-blue-600 disabled:opacity-50 text-white transition active:scale-95 shadow"
+                    disabled={!selectedText || !selectedText.trim() || isRewriting}
+                    className="py-2 px-4 rounded-xl text-xs font-bold bg-blue-650 hover:bg-blue-600 disabled:opacity-40 text-white transition active:scale-95 shadow flex items-center gap-1.5"
                   >
-                    💼 Executive SaaS Tone
+                    <span>💼</span> <span>Executive SaaS Tone</span>
                   </button>
                 </div>
               </div>
@@ -1552,6 +2347,21 @@ export default function App() {
                     className="w-full bg-[#111] border border-[#3e444b] rounded-xl py-2 px-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
                   />
                   <span className="text-[10px] text-zinc-500 block mt-1">Submit email events directly to this webhook without backend database records.</span>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold uppercase tracking-wider text-slate-300 mb-1.5">Stripe Publishable Key (pk_test_...)</label>
+                  <input 
+                    type="text" 
+                    value={stripePublishableKey}
+                    onChange={(e) => {
+                      setStripePublishableKey(e.target.value);
+                      localStorage.setItem("sabis_stripe_publishable_key", e.target.value);
+                    }}
+                    placeholder="pk_test_51Px..." 
+                    className="w-full bg-[#111] border border-[#3e444b] rounded-xl py-2 px-3 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-colors"
+                  />
+                  <span className="text-[10px] text-zinc-500 block mt-1">Bind this key to the generated front-end Stripe Payment SDK elements when layout includes purchase/subscription templates.</span>
                 </div>
 
                 <div>

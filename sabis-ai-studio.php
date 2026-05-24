@@ -21,6 +21,7 @@ class Sabis_AI_Studio {
     const OPTION_API_KEY = 'sabis_gemini_api_key';
     const OPTION_GROQ_KEY = 'sabis_groq_api_key';
     const OPTION_WEBHOOK_URL = 'sabis_sheets_webhook_url';
+    const OPTION_STRIPE_KEY = 'sabis_stripe_publishable_key';
 
     public static function get_instance() {
         if (null === self::$instance) {
@@ -42,11 +43,18 @@ class Sabis_AI_Studio {
         add_action('wp_ajax_sabis_save_section_block', array($this, 'save_section_block_ajax'));
         add_action('wp_ajax_sabis_auto_webp_upload', array($this, 'auto_webp_upload_ajax'));
         add_action('wp_ajax_sabis_regenerate_section_via_gemini', array($this, 'regenerate_section_via_gemini_ajax'));
+        add_action('wp_ajax_sabis_get_wordpress_page', array($this, 'get_wordpress_page_ajax'));
         add_action('wp_ajax_sabis_screenshot_to_code', array($this, 'screenshot_to_code_ajax'));
         add_action('wp_ajax_sabis_generate_component', array($this, 'generate_component_ajax'));
 
         add_shortcode('sabis_section', array($this, 'render_section_shortcode'));
         add_filter('wp_handle_upload', array($this, 'auto_webp_media_handler'), 10, 2);
+
+        // NATIVE WORDPRESS INTEGRATION SHORTCUTS & ACTIONS
+        add_filter('page_row_actions', array($this, 'add_sabis_row_actions'), 10, 2);
+        add_filter('post_row_actions', array($this, 'add_sabis_row_actions'), 10, 2);
+        add_action('admin_bar_menu', array($this, 'add_sabis_admin_bar_menu'), 999);
+        add_action('admin_enqueue_scripts', array($this, 'inject_gutenberg_sabis_buttons'));
     }
 
     public function init_features() {
@@ -89,10 +97,11 @@ class Sabis_AI_Studio {
         wp_add_inline_style('grapesjs-css', "
             .sabis-dashboard-wrap { 
                 max-width: 100%; 
+                overflow-x: hidden;
                 box-sizing: border-box; 
                 font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; 
-                padding: 24px; 
-                background: #0f172a; 
+                padding: 28px; 
+                background: linear-gradient(135deg, #070a13 0%, #0d1222 100%); 
                 color: #f1f5f9;
                 min-height: calc(100vh - 40px); 
             }
@@ -100,18 +109,19 @@ class Sabis_AI_Studio {
                 color: #f1f5f9 !important;
             }
             .sabis-card { 
-                background: rgba(30, 41, 59, 0.7); 
-                backdrop-filter: blur(12px);
-                -webkit-backdrop-filter: blur(12px);
-                border: 1px solid rgba(255, 255, 255, 0.08);
-                box-shadow: 0 10px 30px 0 rgba(0, 0, 0, 0.25); 
-                border-radius: 16px; 
-                padding: 28px; 
+                background: rgba(13, 17, 30, 0.65); 
+                backdrop-filter: blur(16px);
+                -webkit-backdrop-filter: blur(16px);
+                border: 1px solid rgba(234, 179, 8, 0.12);
+                box-shadow: 0 16px 40px 0 rgba(0, 0, 0, 0.45), inset 0 1px 1px rgba(255, 255, 255, 0.05); 
+                border-radius: 20px; 
+                padding: 32px; 
                 margin-bottom: 24px; 
-                transition: transform 0.3s ease, box-shadow 0.3s ease;
+                transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
             }
             .sabis-card:hover {
-                box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.35);
+                border-color: rgba(234, 179, 8, 0.3);
+                box-shadow: 0 20px 48px 0 rgba(0, 0, 0, 0.55), 0 0 20px rgba(234, 179, 8, 0.08), inset 0 1px 1px rgba(255, 255, 255, 0.08);
             }
             .sabis-btn { 
                 display: inline-flex; 
@@ -190,6 +200,82 @@ class Sabis_AI_Studio {
             }
             #gjs { 
                 flex-grow: 1; 
+            }
+            .gjs-frame {
+                max-width: 100% !important;
+                box-sizing: border-box !important;
+            }
+                        /* GrapesJS selected component toolbar protection to prevent button clipping */
+            .gjs-toolbar {
+                opacity: 1 !important;
+                transform: none !important;
+                display: flex !important;
+                flex-direction: row !important;
+                align-items: center !important;
+                width: auto !important;
+                flex-wrap: nowrap !important;
+                max-width: none !important;
+                background-color: rgba(30, 41, 59, 0.98) !important;
+                border: 1px solid rgba(255, 255, 255, 0.15) !important;
+                border-radius: 8px !important;
+                padding: 4px !important;
+                gap: 4px !important;
+                box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+                overflow: visible !important;
+                z-index: 9999 !important;
+            }
+            #sabis-btn-ai-redesign, .sabis-gjs-ai-btn {
+                position: absolute !important;
+                bottom: calc(100% + 8px) !important;
+                left: 0 !important;
+                width: max-content !important;
+                max-width: 130px !important;
+                display: inline-flex !important;
+                padding: 4px 10px !important;
+                z-index: 999999 !important;
+                font-size: 11px !important;
+                background-color: #3b82f6 !important;
+                color: #ffffff !important;
+                font-weight: 700 !important;
+                border-radius: 6px !important;
+                align-items: center !important;
+                justify-content: center !important;
+                gap: 4px !important;
+                height: 28px !important;
+                line-height: 28px !important;
+                transition: all 0.2s ease-in-out !important;
+                box-shadow: 0 4px 10px rgba(59, 130, 246, 0.4) !important;
+                white-space: nowrap !important;
+            }
+            #sabis-btn-ai-redesign:hover, .sabis-gjs-ai-btn:hover {
+                background-color: #2563eb !important;
+                transform: scale(1.04) !important;
+                box-shadow: 0 6px 14px rgba(37, 99, 235, 0.5) !important;
+            }
+            /* Prevent horizontal overflow on GrapesJS iframe workspace and canvas container */
+            #gjs-wrapper {
+                max-width: 100vw !important;
+                overflow-x: hidden !important;
+                box-sizing: border-box !important;
+            }
+            .gjs-cv-canvas {
+                max-width: 100% !important;
+                overflow: hidden !important;
+            }
+            /* Responsive media queries for mobile-first layout support */
+            @media (max-width: 768px) {
+                .sabis-dashboard-wrap {
+                    padding: 12px !important;
+                }
+                .sabis-card {
+                    padding: 16px !important;
+                }
+                .sabis-editor-container {
+                    min-height: 480px !important;
+                }
+                .sabis-input-group {
+                    flex-direction: column !important;
+                }
             }
             .sabis-input-group { 
                 display: flex; 
@@ -378,32 +464,44 @@ class Sabis_AI_Studio {
             if (isset($_POST['sheets_webhook_url'])) {
                 update_option(self::OPTION_WEBHOOK_URL, esc_url_raw($_POST['sheets_webhook_url']));
             }
+            if (isset($_POST['stripe_publishable_key'])) {
+                update_option(self::OPTION_STRIPE_KEY, sanitize_text_field($_POST['stripe_publishable_key']));
+            }
             echo '<div class="notice notice-success is-dismissible"><p>' . __('Settings saved successfully!', 'sabis-ai-studio') . '</p></div>';
         }
 
         $api_key = get_option(self::OPTION_API_KEY, '');
         $groq_api_key = get_option(self::OPTION_GROQ_KEY, '');
         $webhook_url = get_option(self::OPTION_WEBHOOK_URL, '');
+        $stripe_key = get_option(self::OPTION_STRIPE_KEY, '');
         ?>
         <div class="sabis-dashboard-wrap">
             <h1 class="wp-heading-inline" style="font-weight: 800; font-size: 32px; letter-spacing: -0.025em; margin-bottom: 24px; display: inline-flex; align-items: center;">
-                <!-- Stunning Inline SVG Logo -->
-                <svg class="sabis-svg-logo" width="40" height="40" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 14px; filter: drop-shadow(0 0 8px rgba(34, 211, 238, 0.5));">
+                <!-- Stunning Inline World-Class SVG Gold Logo -->
+                <svg class="sabis-svg-logo animate-pulse" width="46" height="46" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg" style="vertical-align: middle; margin-right: 14px; filter: drop-shadow(0 0 12px rgba(234, 179, 8, 0.45));">
                     <defs>
-                        <linearGradient id="sabis-grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stop-color="#06b6d4" />
-                            <stop offset="100%" stop-color="#8b5cf6" />
+                        <linearGradient id="wpSabisGoldGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stop-color="#FDE047" />
+                            <stop offset="50%" stop-color="#EAB308" />
+                            <stop offset="100%" stop-color="#CA8A04" />
+                        </linearGradient>
+                        <linearGradient id="wpSabisGlowNeon" x1="0%" y1="100%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#10B981" />
+                            <stop offset="100%" stop-color="#3B82F6" />
                         </linearGradient>
                     </defs>
-                    <circle cx="50" cy="50" r="45" stroke="url(#sabis-grad)" stroke-width="4" fill="rgba(15, 23, 42, 0.82)" />
-                    <polygon points="50,22 74,40 64,74 36,74 26,40" stroke="url(#sabis-grad)" stroke-width="2" fill="none" />
-                    <path d="M50,30 L65,42 L59,62 L41,62 L35,42 Z" fill="url(#sabis-grad)" opacity="0.8" />
-                    <circle cx="50" cy="48" r="6" fill="#ffffff" />
-                    <path d="M50,15 L50,22 M85,50 L78,50 M50,85 L50,78 M15,50 L22,50" stroke="#06b6d4" stroke-width="3" stroke-linecap="round" />
+                    <circle cx="50" cy="50" r="44" stroke="url(#wpSabisGoldGrad)" stroke-width="2.5" stroke-dasharray="5 5" opacity="0.8" />
+                    <circle cx="50" cy="50" r="35" stroke="url(#wpSabisGlowNeon)" stroke-width="1.5" opacity="0.5" />
+                    <polygon points="50,15 82,33 82,67 50,85 18,67 18,33" stroke="url(#wpSabisGoldGrad)" stroke-width="1.5" stroke-linecap="round" fill="rgba(15, 23, 42, 0.65)" />
+                    <path d="M40 38 C40 31, 60 31, 60 38 C60 44, 40 46, 40 52 C40 59, 60 59, 60 52" stroke="url(#wpSabisGoldGrad)" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" />
+                    <circle cx="50" cy="50" r="3" fill="#FACC15" />
+                    <circle cx="18" cy="33" r="2.5" fill="#3B82F6" />
+                    <circle cx="82" cy="33" r="2.5" fill="#10B981" />
+                    <circle cx="50" cy="85" r="2.5" fill="#FACC15" />
                 </svg>
-                <span>Sabis AI Studio</span>
-                <span style="font-size: 14px; font-weight: 500; color: #8b5cf6; background: rgba(139, 92, 246, 0.15); padding: 4px 10px; border-radius: 9999px; margin-left:14px; border: 1px solid rgba(139, 92, 246, 0.3);">
-                    v1.1.0 Dual-AI Hybrid
+                <span style="background: linear-gradient(135deg, #FFF 0%, #FACC15 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-weight:900;">Sabis AI Studio</span>
+                <span style="font-size: 13px; font-weight: 700; color: #facc15; background: rgba(234, 179, 8, 0.12); padding: 4px 12px; border-radius: 9999px; margin-left:14px; border: 1px solid rgba(234, 179, 8, 0.25); text-transform: uppercase; letter-spacing: 1px;">
+                    Ultimate Professional v2.0
                 </span>
             </h1>
 
@@ -432,6 +530,12 @@ class Sabis_AI_Studio {
                             </label>
                             <input type="url" name="sheets_webhook_url" value="<?php echo esc_url($webhook_url); ?>" placeholder="https://script.google.com/macros/s/..." style="width:100%;" />
                         </div>
+                        <div>
+                            <label style="display:block; font-weight:600; font-size:13px; margin-bottom:6px; color:#94a3b8;">
+                                Stripe Publishable Key (pk_...)
+                            </label>
+                            <input type="password" name="stripe_publishable_key" value="<?php echo esc_attr($stripe_key); ?>" placeholder="pk_live_... / pk_test_..." style="width:100%;" />
+                        </div>
                     </div>
                     <button type="submit" class="sabis-btn sabis-btn-primary" style="align-self:flex-start; padding: 10px 20px; font-size:13px; margin-top: 6px;">
                         Save Core Configuration
@@ -445,8 +549,94 @@ class Sabis_AI_Studio {
                 <div class="sabis-input-group">
                     <textarea id="sabis-prompt" class="sabis-textarea" placeholder="Speak or type a prompt... e.g., 'A gorgeous grid layout for organic green tea, premium layout aesthetics, and gold accents.'"></textarea>
                     <button type="button" id="sabis-mic-btn" class="sabis-mic-btn" title="Speak to Voice Dictate">🎤</button>
+                    <input type="file" id="sabis-reference-image" accept="image/*" style="display:none;" />
+                    <button type="button" id="sabis-ref-image-btn" class="sabis-mic-btn" style="padding: 0 15px; font-size: 13px; display: inline-flex; align-items: center; gap: 4px; border-radius: 12px; font-weight: 500;" title="Upload Reference Image to guide layout aesthetics">📁 Reference Image</button>
                     <!-- Text Send Button -->
                     <button type="button" id="sabis-send-btn" class="sabis-send-btn" title="Send text prompt to generator">🚀</button>
+                </div>
+
+                <div class="sabis-multi-page-setup" style="margin-bottom: 20px; padding: 15px; border-top: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column; gap: 12px; background: rgba(15, 23, 42, 0.2); border-radius: 12px;">
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <span style="font-size: 13px; font-weight: 600; color: #94a3b8;">Pages Count:</span>
+                            <select id="sabis-page-count" style="padding: 4px 10px; font-size: 12px; background: #0f172a; color: #fff; border: 1px solid rgba(255,255,255,0.15); border-radius: 4px;">
+                                <option value="1">1 Page</option>
+                                <option value="2">2 Pages</option>
+                                <option value="3">3 Pages</option>
+                                <option value="4">4 Pages</option>
+                                <option value="5">5 Pages</option>
+                                <option value="6">6 Pages</option>
+                                <option value="7">7 Pages</option>
+                                <option value="8">8 Pages</option>
+                                <option value="9">9 Pages</option>
+                                <option value="10">10 Pages</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 14px; font-size: 13px;">
+                            <span style="font-weight: 600; color: #94a3b8;">Included Templates:</span>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #cbd5e1;">
+                                <input type="checkbox" class="sabis-page-template-cb" value="Home" checked style="accent-color: #8b5cf6;" /> Home
+                            </label>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #cbd5e1;">
+                                <input type="checkbox" class="sabis-page-template-cb" value="About Us" style="accent-color: #8b5cf6;" /> About Us
+                            </label>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #cbd5e1;">
+                                <input type="checkbox" class="sabis-page-template-cb" value="Services" style="accent-color: #8b5cf6;" /> Services
+                            </label>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #cbd5e1;">
+                                <input type="checkbox" class="sabis-page-template-cb" value="Product Landing" style="accent-color: #8b5cf6;" /> Product Landing
+                            </label>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #cbd5e1;">
+                                <input type="checkbox" class="sabis-page-template-cb" value="Product Specs" style="accent-color: #8b5cf6;" /> Product Specs
+                            </label>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #cbd5e1;">
+                                <input type="checkbox" class="sabis-page-template-cb" value="Pricing Plans" style="accent-color: #8b5cf6;" /> Pricing Plans
+                            </label>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #cbd5e1;">
+                                <input type="checkbox" class="sabis-page-template-cb" value="Testimonials" style="accent-color: #8b5cf6;" /> Testimonials
+                            </label>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #cbd5e1;">
+                                <input type="checkbox" class="sabis-page-template-cb" value="FAQs" style="accent-color: #8b5cf6;" /> FAQs
+                            </label>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #cbd5e1;">
+                                <input type="checkbox" class="sabis-page-template-cb" value="Contact" style="accent-color: #8b5cf6;" /> Contact
+                            </label>
+                            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #cbd5e1;">
+                                <input type="checkbox" class="sabis-page-template-cb" value="Custom Business Page" style="accent-color: #8b5cf6;" /> Custom Business Page
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Existing Page Re-designer Addition Panel -->
+                    <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 12px; margin-top: 4px;">
+                        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+                            <span style="font-size: 13px; font-weight: 600; color: #a5b4fc; display: inline-flex; align-items: center; gap: 4px;">🔄 Select Existing Page to Re-design:</span>
+                            <select id="sabis-existing-page-selector" style="max-width: 280px; padding: 4px 10px; font-size: 12px; background: #0f172a; color: #fff; border: 1px solid rgba(255,255,255,0.15); border-radius: 4px; cursor: pointer;">
+                                <option value="">-- Choose Published Page --</option>
+                                <?php
+                                $wp_pages = get_posts(array(
+                                    'post_type' => 'page',
+                                    'post_status' => 'publish',
+                                    'posts_per_page' => -1,
+                                    'orderby' => 'title',
+                                    'order' => 'ASC'
+                                ));
+                                foreach ($wp_pages as $p) {
+                                    echo '<option value="' . esc_attr($p->ID) . '">' . esc_html($p->post_title) . ' (#' . esc_attr($p->ID) . ')</option>';
+                                }
+                                ?>
+                            </select>
+                            <button type="button" id="sabis-load-existing-page-btn" class="sabis-btn sabis-btn-success" style="padding: 4px 12px; font-size: 11px; font-weight: 700; height: 30px; line-height: normal; display: inline-flex; align-items: center; gap: 4px;" title="Load this page's HTML structure into GrapesJS canvas">
+                                📥 Load Page into Studio
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Workspace Tabs Nav -->
+                    <div id="sabis-editor-tabs-container" style="display: none; align-items: center; gap: 8px; background: rgba(15, 23, 42, 0.4); border: 1px dashed rgba(255,255,255,0.1); border-radius: 10px; padding: 10px 14px; margin-top: 4px;">
+                        <span style="font-size: 12px; font-weight: 700; color: #22d3ee; margin-right: 6px; display: inline-flex; align-items: center; gap: 4px;">📂 AI Multi-Page Switcher:</span>
+                        <div id="sabis-tabs-nav" style="display: flex; gap: 8px; flex-wrap: wrap;"></div>
+                    </div>
                 </div>
 
                 <div class="sabis-toolbar">
@@ -470,11 +660,17 @@ class Sabis_AI_Studio {
                 <div style="background:#1e293b; border-bottom:1px solid rgba(255,255,255,0.08); padding:12px; display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
                     <div style="display:flex; align-items:center; gap:6px;">
                         <span style="font-size:12px; font-weight:600; color:#94a3b8;">Design Theme:</span>
-                        <select id="sabis-theme-preset" style="padding:4px 8px; border-radius:4px; font-size:12px;">
+                        <select id="sabis-theme-preset" style="padding:4px 8px; border-radius:4px; font-size:12px; background: #1e293b; color: #fff; border: 1px solid rgba(255,255,255,0.15); cursor: pointer;">
                             <option value="Minimal Light">Minimal Light</option>
                             <option value="Cyberpunk Dark">Cyberpunk Dark</option>
                             <option value="Royal Gold">Royal Gold</option>
+                            <option value="Sunset Orange & Charcoal">Sunset Orange & Charcoal</option>
+                            <option value="Forest Emerald & Sage">Forest Emerald & Sage</option>
+                            <option value="Deep Ocean Blues">Deep Ocean Blues</option>
+                            <option value="Dracula Vampire">Dracula Vampire</option>
+                            <option value="Custom Accent">✒️ Custom Accent Profile...</option>
                         </select>
+                        <input type="text" id="sabis-theme-custom-desc" placeholder="Specify custom accent description..." style="display:none; padding:4px 8px; border-radius:4px; font-size:11px; background:#0f172a; color:#fff; border:1px solid rgba(255,255,255,0.15); width:240px; margin-left:6px;" />
                     </div>
 
                     <div style="display:flex; align-items:center; gap:6px; border-left:1px solid rgba(255,255,255,0.1); padding-left:12px;">
@@ -595,6 +791,24 @@ class Sabis_AI_Studio {
             // Context Menu Coordination Transmission Refactoring
             const contextMenu = document.getElementById('sabis-context-menu');
             editor.on('canvas:load', () => {
+                const head = editor.Canvas.getHead();
+                if (head) {
+                    const styleEl = document.createElement('style');
+                    styleEl.innerHTML = `
+                        body { 
+                            overflow-x: hidden !important; 
+                            width: 100% !important; 
+                            margin: 0; 
+                            padding: 0; 
+                            box-sizing: border-box !important; 
+                        }
+                        * { 
+                            box-sizing: border-box !important; 
+                            max-width: 100% !important; 
+                        }
+                    `;
+                    head.appendChild(styleEl);
+                }
                 const body = editor.Canvas.getBody();
                 body.addEventListener('contextmenu', function(e) {
                     e.preventDefault();
@@ -740,7 +954,95 @@ class Sabis_AI_Studio {
                 recognizer.onresult = (e) => promptBox.value += ' ' + e.results[0][0].transcript;
                 recognizer.onerror = () => micBtn.classList.remove('sabis-mic-active');
             } else {
-                micBtn.style.display = 'none';
+                if (micBtn) micBtn.style.display = 'none';
+            }
+
+            // Reference Image trigger & handler
+            const refImgBtn = document.getElementById('sabis-ref-image-btn');
+            const refImgInput = document.getElementById('sabis-reference-image');
+            window.attachedReferenceImage = null;
+
+            if (refImgBtn && refImgInput) {
+                refImgBtn.addEventListener('click', () => refImgInput.click());
+                refImgInput.addEventListener('change', function() {
+                    const file = this.files[0];
+                    if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        window.attachedReferenceImage = e.target.result;
+                        refImgBtn.textContent = "📁 Attached";
+                        refImgBtn.style.background = "#06b6d4";
+                        refImgBtn.style.color = "#ffffff";
+                        updateStatus('Reference image selected and successfully loaded into multimodal pipeline!', 'ready');
+                    };
+                    reader.readAsDataURL(file);
+                });
+            }
+
+            // Tabs / Multiple Page State Variables
+            window.sabisPagesData = {};
+            window.sabisCurrentActiveTab = null;
+
+            function initSabisTabs(pagesArray) {
+                window.sabisPagesData = {};
+                const tabsNav = document.getElementById('sabis-tabs-nav');
+                tabsNav.innerHTML = '';
+                const container = document.getElementById('sabis-editor-tabs-container');
+                
+                if (pagesArray && pagesArray.length > 0) {
+                    container.style.display = 'flex';
+                    pagesArray.forEach((p, idx) => {
+                        window.sabisPagesData[p.title] = {
+                            html: p.html,
+                            title: p.title
+                        };
+                        
+                        const tabBtn = document.createElement('button');
+                        tabBtn.type = 'button';
+                        tabBtn.className = 'sabis-viewport-btn';
+                        tabBtn.style.padding = '4px 10px';
+                        tabBtn.style.fontSize = '12px';
+                        tabBtn.textContent = p.title;
+                        tabBtn.setAttribute('data-tab-title', p.title);
+                        
+                        if (idx === 0) {
+                            tabBtn.classList.add('active');
+                            window.sabisCurrentActiveTab = p.title;
+                        }
+                        
+                        tabBtn.addEventListener('click', function() {
+                            switchSabisTab(p.title);
+                        });
+                        
+                        tabsNav.appendChild(tabBtn);
+                    });
+                    
+                    editor.setComponents(pagesArray[0].html);
+                } else {
+                    container.style.display = 'none';
+                }
+            }
+
+            function switchSabisTab(targetTitle) {
+                if (window.sabisCurrentActiveTab === targetTitle) return;
+                
+                // Save current active tab state
+                if (window.sabisCurrentActiveTab && window.sabisPagesData[window.sabisCurrentActiveTab]) {
+                    window.sabisPagesData[window.sabisCurrentActiveTab].html = editor.getHtml();
+                }
+                
+                // Update active visualization
+                document.querySelectorAll('#sabis-tabs-nav button').forEach(btn => {
+                    if (btn.getAttribute('data-tab-title') === targetTitle) {
+                        btn.classList.add('active');
+                    } else {
+                        btn.classList.remove('active');
+                    }
+                });
+                
+                window.sabisCurrentActiveTab = targetTitle;
+                editor.setComponents(window.sabisPagesData[targetTitle].html);
+                updateStatus('Editing: ' + targetTitle, 'ready');
             }
 
             const generateBtn = document.getElementById('btn-generate-ai');
@@ -765,6 +1067,7 @@ class Sabis_AI_Studio {
             // Reset Canvas to default
             resetBtn.addEventListener('click', function() {
                 if (confirm('Are you sure you want to completely reset the visual canvas back to its original prepped slate layout?')) {
+                    initSabisTabs([]);
                     editor.setComponents(defaultTemplate);
                     updateStatus('Canvas Reset Completed LTR Lived!', 'ready');
                 }
@@ -792,29 +1095,54 @@ class Sabis_AI_Studio {
                      alert('Please fill in or dictate a prompt.');
                      return;
                 }
-                updateStatus('Dual-AI Router routing using Gemini 2.5 Pro...', 'loading');
+                
+                // Gather page selection counts and templates
+                const pageCount = document.getElementById('sabis-page-count').value;
+                const selectedTemplates = [];
+                document.querySelectorAll('.sabis-page-template-cb:checked').forEach(cb => {
+                    selectedTemplates.push(cb.value);
+                });
+
+                updateStatus('Dual-AI Router routing using Gemini 2.5 Pro Multimodal Vision...', 'loading');
                 generateBtn.disabled = true;
                 if(sendBtn) sendBtn.disabled = true;
+
+                const payload = {
+                    action: 'sabis_generate_page_via_gemini',
+                    prompt: userPrompt,
+                    theme: document.getElementById('sabis-theme-preset').value,
+                    custom_theme_desc: document.getElementById('sabis-theme-custom-desc').value,
+                    pages_count: pageCount,
+                    templates: JSON.stringify(selectedTemplates),
+                    nonce: '<?php echo wp_create_nonce("sabis_gemini_nonce"); ?>'
+                };
+
+                if (window.attachedReferenceImage) {
+                    payload.reference_image = window.attachedReferenceImage;
+                }
 
                 jQuery.ajax({
                     url: ajaxurl,
                     method: 'POST',
-                    data: {
-                        action: 'sabis_generate_page_via_gemini',
-                        prompt: userPrompt,
-                        theme: document.getElementById('sabis-theme-preset').value,
-                        nonce: '<?php echo wp_create_nonce("sabis_gemini_nonce"); ?>'
-                    },
+                    data: payload,
                     success: function(response) {
                         generateBtn.disabled = false;
                         if(sendBtn) sendBtn.disabled = false;
-                        if (response.success && response.data.html) {
-                            editor.setComponents(response.data.html);
-                            // Auto reset to standard margins wrapper
+                        if (response.success && response.data) {
+                            if (response.data.pages && Array.isArray(response.data.pages)) {
+                                initSabisTabs(response.data.pages);
+                                updateStatus('AI Multi-Pages Synced Successful!', 'ready');
+                            } else if (response.data.html) {
+                                initSabisTabs([]);
+                                editor.setComponents(response.data.html);
+                                updateStatus('AI Hybrid Design Synced!', 'ready');
+                            }
+                            
+                            // Auto reset theme layout accents
                             const preset = document.getElementById('sabis-theme-preset').value;
                             const wrapper = editor.getWrapper();
                             if (wrapper) {
-                                wrapper.removeClass('bg-slate-950 text-cyan-400 bg-zinc-50 text-zinc-900 bg-slate-900 text-yellow-100');
+                                wrapper.removeClass('bg-slate-950 text-cyan-400 bg-zinc-50 text-zinc-900 bg-slate-900 text-yellow-101 bg-slate-900 text-yellow-100');
                                 if (preset === 'Cyberpunk Dark') {
                                     wrapper.addClass('bg-slate-950 text-cyan-400');
                                 } else if (preset === 'Minimal Light') {
@@ -823,7 +1151,6 @@ class Sabis_AI_Studio {
                                     wrapper.addClass('bg-slate-900 text-yellow-100');
                                 }
                             }
-                            updateStatus('AI Hybrid Design Synced!', 'ready');
                             publishBtn.disabled = false;
                         } else {
                             updateStatus('Failed routing.', 'ready');
@@ -839,20 +1166,42 @@ class Sabis_AI_Studio {
             }
 
             generateBtn.addEventListener('click', handleAILayoutGeneration);
-            sendBtn.addEventListener('click', handleAILayoutGeneration);
+            if (sendBtn) {
+                sendBtn.addEventListener('click', handleAILayoutGeneration);
+            }
 
             // Theme Accents Controller
             document.getElementById('sabis-theme-preset').addEventListener('change', function() {
                 const preset = this.value;
+                const customInput = document.getElementById('sabis-theme-custom-desc');
+                if (preset === 'Custom Accent') {
+                    customInput.style.display = 'inline-block';
+                } else {
+                    customInput.style.display = 'none';
+                    customInput.value = '';
+                }
+
                 const wrapper = editor.getWrapper();
                 if (!wrapper) return;
-                wrapper.removeClass('bg-slate-950 text-cyan-400 bg-zinc-50 text-zinc-900 bg-slate-900 text-yellow-100');
+                wrapper.removeClass('bg-slate-950 text-cyan-400 bg-zinc-50 text-zinc-900 bg-slate-900 text-yellow-101 text-yellow-100');
+                wrapper.removeClass('bg-[#0e0f11] text-orange-400 bg-[#0a100d] text-emerald-400 bg-[#050b14] text-sky-400 bg-[#121214] text-purple-400 bg-[#0d0d0e] text-zinc-100');
+                
                 if (preset === 'Cyberpunk Dark') {
                     wrapper.addClass('bg-slate-950 text-cyan-400');
                 } else if (preset === 'Minimal Light') {
                     wrapper.addClass('bg-zinc-50 text-zinc-900');
                 } else if (preset === 'Royal Gold') {
                     wrapper.addClass('bg-slate-900 text-yellow-100');
+                } else if (preset === 'Sunset Orange & Charcoal') {
+                    wrapper.addClass('bg-[#0e0f11] text-orange-400');
+                } else if (preset === 'Forest Emerald & Sage') {
+                    wrapper.addClass('bg-[#0a100d] text-emerald-400');
+                } else if (preset === 'Deep Ocean Blues') {
+                    wrapper.addClass('bg-[#050b14] text-sky-400');
+                } else if (preset === 'Dracula Vampire') {
+                    wrapper.addClass('bg-[#121214] text-purple-400');
+                } else if (preset === 'Custom Accent') {
+                    wrapper.addClass('bg-[#0d0d0e] text-zinc-100');
                 }
             });
 
@@ -871,18 +1220,35 @@ class Sabis_AI_Studio {
                 clearActiveViewportClass();
                 viewDesktop.classList.add('active');
                 editor.setDevice('desktop');
+                const frame = document.querySelector('.gjs-frame');
+                if (frame) {
+                    frame.style.width = '100%';
+                    frame.style.maxWidth = '100%';
+                }
             });
 
             viewTablet.addEventListener('click', function() {
                 clearActiveViewportClass();
                 viewTablet.classList.add('active');
                 editor.setDevice('tablet');
+                const frame = document.querySelector('.gjs-frame');
+                if (frame) {
+                    frame.style.width = '768px';
+                    frame.style.maxWidth = '100%';
+                    frame.style.margin = '0 auto';
+                }
             });
 
             viewMobile.addEventListener('click', function() {
                 clearActiveViewportClass();
                 viewMobile.classList.add('active');
                 editor.setDevice('mobile');
+                const frame = document.querySelector('.gjs-frame');
+                if (frame) {
+                    frame.style.width = '375px';
+                    frame.style.maxWidth = '100%';
+                    frame.style.margin = '0 auto';
+                }
             });
 
             // Screenshot to Code logic click handler
@@ -957,32 +1323,70 @@ class Sabis_AI_Studio {
             });
 
             publishBtn.addEventListener('click', function() {
-                const title = prompt('Provide SEO Page Title:', 'My Custom Layout');
-                if (!title) return;
-                publishBtn.disabled = true;
-                updateStatus('Saving page & generating SEO parameters...', 'loading');
+                // Save current page state
+                if (window.sabisCurrentActiveTab && window.sabisPagesData[window.sabisCurrentActiveTab]) {
+                    window.sabisPagesData[window.sabisCurrentActiveTab].html = editor.getHtml();
+                }
 
-                jQuery.ajax({
-                    url: ajaxurl,
-                    method: 'POST',
-                    data: {
-                        action: 'sabis_publish_visual_page',
-                        html: editor.getHtml(),
-                        title: title,
-                        nonce: '<?php echo wp_create_nonce("sabis_publish_nonce"); ?>'
-                    },
-                    success: function(res) {
-                        publishBtn.disabled = false;
-                        if (res.success) {
-                            feedbackContainer.style.display = 'block';
-                            document.getElementById('feedback-post-link').innerHTML = '<a href="' + res.data.permalink + '" target="_blank" style="font-weight:bold; color:#10b981;">View Page: ' + res.data.permalink + '</a>';
-                            document.getElementById('feedback-audit-log').textContent = res.data.audit;
-                            updateStatus('Saved successfully', 'ready');
-                        } else {
-                            alert(res.data.error || 'Failed saving WordPress page');
+                const multCount = Object.keys(window.sabisPagesData).length;
+                if (multCount > 1) {
+                    if (!confirm('You are about to mass-publish ' + multCount + ' independent visual pages directly to WordPress. Proceed?')) return;
+                    publishBtn.disabled = true;
+                    updateStatus('Mass-publishing pages and generating custom SEO meta structures...', 'loading');
+
+                    jQuery.ajax({
+                        url: ajaxurl,
+                        method: 'POST',
+                        data: {
+                            action: 'sabis_publish_visual_page',
+                            pages: JSON.stringify(Object.values(window.sabisPagesData)),
+                            nonce: '<?php echo wp_create_nonce("sabis_publish_nonce"); ?>'
+                        },
+                        success: function(res) {
+                            publishBtn.disabled = false;
+                            if (res.success) {
+                                feedbackContainer.style.display = 'block';
+                                let linksHtml = '<div style="display:flex; flex-direction:column; gap:6px;">';
+                                res.data.pages.forEach(p => {
+                                    linksHtml += '<div><a href="' + p.permalink + '" target="_blank" style="font-weight:bold; color:#10b981;">View ' + p.title + ': ' + p.permalink + '</a></div>';
+                                });
+                                linksHtml += '</div>';
+                                document.getElementById('feedback-post-link').innerHTML = linksHtml;
+                                document.getElementById('feedback-audit-log').textContent = res.data.audit;
+                                updateStatus('Mass-publishing completed!', 'ready');
+                            } else {
+                                alert(res.data.error || 'Failed mass-publishing WordPress pages');
+                            }
                         }
-                    }
-                });
+                    });
+                } else {
+                    const title = prompt('Provide SEO Page Title:', 'My Custom Layout');
+                    if (!title) return;
+                    publishBtn.disabled = true;
+                    updateStatus('Saving page & generating SEO parameters...', 'loading');
+
+                    jQuery.ajax({
+                        url: ajaxurl,
+                        method: 'POST',
+                        data: {
+                            action: 'sabis_publish_visual_page',
+                            html: editor.getHtml(),
+                            title: title,
+                            nonce: '<?php echo wp_create_nonce("sabis_publish_nonce"); ?>'
+                        },
+                        success: function(res) {
+                            publishBtn.disabled = false;
+                            if (res.success) {
+                                feedbackContainer.style.display = 'block';
+                                document.getElementById('feedback-post-link').innerHTML = '<a href="' + res.data.permalink + '" target="_blank" style="font-weight:bold; color:#10b981;">View Page: ' + res.data.permalink + '</a>';
+                                document.getElementById('feedback-audit-log').textContent = res.data.audit;
+                                updateStatus('Saved successfully', 'ready');
+                            } else {
+                                alert(res.data.error || 'Failed saving WordPress page');
+                            }
+                        }
+                    });
+                }
             });
 
             document.getElementById('btn-export-zip').addEventListener('click', function() {
@@ -1061,11 +1465,80 @@ class Sabis_AI_Studio {
                         id: 'regenerate-section',
                         command: 'regenerate-section-command',
                         label: '✨ AI Redesign',
-                        attributes: { title: 'AI Redesigns via Gemini 2.5 Pro' }
+                        attributes: { 
+                            id: 'sabis-btn-ai-redesign',
+                            title: 'AI Redesigns via Gemini 2.5 Pro' 
+                        }
                     });
-                    model.set('toolbar', toolbar);
+                    model.set('toolbar', [...toolbar]);
+                    model.trigger('change:toolbar');
                 }
             });
+
+            // Capture-phase event listeners to guarantee that clicking/touching the '✨ AI Redesign' button runs properly without misfiring on mobile
+            const handleAiRedesignTrigger = function(e) {
+                const btn = e.target.closest('#sabis-btn-ai-redesign');
+                if (btn) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Intercepting click for AI Redesign on mobile...');
+                    editor.runCommand('regenerate-section-command');
+                }
+            };
+            document.addEventListener('click', handleAiRedesignTrigger, { capture: true });
+            document.addEventListener('touchstart', handleAiRedesignTrigger, { capture: true });
+
+            // Existing Page Loader AJAX event handler
+            const loadPageBtn = document.getElementById('sabis-load-existing-page-btn');
+            if (loadPageBtn) {
+                loadPageBtn.addEventListener('click', function() {
+                    const selector = document.getElementById('sabis-existing-page-selector');
+                    const pageId = selector.value;
+                    if (!pageId) {
+                        alert('Please select a published WordPress page from the dropdown first.');
+                        return;
+                    }
+                    
+                    updateStatus('Retrieving page layout structure from database...', 'loading');
+                    jQuery.ajax({
+                        url: ajaxurl,
+                        method: 'POST',
+                        data: {
+                            action: 'sabis_get_wordpress_page',
+                            page_id: pageId,
+                            nonce: '<?php echo wp_create_nonce("sabis_get_page_nonce"); ?>'
+                        },
+                        success: function(res) {
+                            if (res.success && typeof res.data.html !== 'undefined') {
+                                editor.setComponents(res.data.html);
+                                updateStatus('Loaded page HTML into GrapesJS canvas successfully!', 'ready');
+                            } else {
+                                alert(res.data.error || 'Failed to retrieve page content from WordPress.');
+                                updateStatus('Error loading page.', 'ready');
+                            }
+                        },
+                        error: function() {
+                            alert('HTTP request failed while querying WordPress page content.');
+                            updateStatus('Network failure', 'ready');
+                        }
+                    });
+                });
+            }
+
+            // Auto loading page if query parameter is present: e.g. ?page=sabis-ai-studio&sabis_edit_page=X
+            <?php if (isset($_GET['sabis_edit_page'])): ?>
+            const urlPageId = "<?php echo esc_js($_GET['sabis_edit_page']); ?>";
+            const selector = document.getElementById('sabis-existing-page-selector');
+            if (selector && urlPageId) {
+                selector.value = urlPageId;
+                setTimeout(() => {
+                    const loadBtn = document.getElementById('sabis-load-existing-page-btn');
+                    if (loadBtn) {
+                        loadBtn.click();
+                    }
+                }, 800);
+            }
+            <?php endif; ?>
         });
         </script>
         <?php
@@ -1078,6 +1551,53 @@ class Sabis_AI_Studio {
         return trim($text);
     }
 
+    private function apply_isolate_wrapper($html) {
+        if (empty($html) || !is_string($html)) {
+            return $html;
+        }
+        $trimmed = trim($html);
+        if (strpos($trimmed, 'data-sabis-isolated=') !== false) {
+            return $html;
+        }
+        $id_str = 'sabis-iso-' . wp_generate_password(7, false, false);
+        return '<div class="sabis-layout-isolated-wrapper relative w-full" data-sabis-isolated="true" id="' . $id_str . '">' . $html . '</div>';
+    }
+
+    private function call_gemini($system_prompt, $user_prompt) {
+        $api_key = get_option(self::OPTION_API_KEY, '');
+        if (empty($api_key)) {
+            return new WP_Error('missing_gemini_key', __('Gemini key is missing.', 'sabis-ai-studio'));
+        }
+        $body = array(
+            'contents' => array(
+                array(
+                    'parts' => array(
+                        array('text' => $user_prompt)
+                    )
+                )
+            ),
+            'systemInstruction' => array(
+                'parts' => array(
+                    array('text' => $system_prompt)
+                )
+            )
+        );
+        $endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=" . $api_key;
+        $response = wp_remote_post($endpoint, array(
+            'headers' => array('Content-Type' => 'application/json'),
+            'body' => wp_json_encode($body),
+            'timeout' => 30
+        ));
+        if (is_wp_error($response)) {
+            return $response;
+        }
+        $res_body = json_decode(wp_remote_retrieve_body($response), true);
+        if (isset($res_body['candidates'][0]['content']['parts'][0]['text'])) {
+            return $res_body['candidates'][0]['content']['parts'][0]['text'];
+        }
+        return new WP_Error('gemini_parse_error', __('Failed parsing Gemini response data.', 'sabis-ai-studio'));
+    }
+
     private function call_groq($system_prompt, $user_prompt) {
         $groq_api_key = get_option(self::OPTION_GROQ_KEY, '');
         if (empty($groq_api_key)) {
@@ -1085,7 +1605,7 @@ class Sabis_AI_Studio {
         }
 
         $payload = array(
-            'model' => 'llama3-8b-8192',
+            'model' => 'llama-3.1-8b-instant',
             'messages' => array(
                 array('role' => 'system', 'content' => $system_prompt),
                 array('role' => 'user', 'content' => $user_prompt)
@@ -1116,9 +1636,20 @@ class Sabis_AI_Studio {
 
     public function generate_page_via_gemini_ajax() {
         check_ajax_referer('sabis_gemini_nonce', 'nonce');
+        if (!current_user_can('edit_pages')) {
+            wp_send_json_error(array('error' => __('Permissions error.', 'sabis-ai-studio')));
+        }
         $prompt = sanitize_textarea_field($_POST['prompt']);
         $theme_preset = sanitize_text_field($_POST['theme']);
+        $custom_theme_desc = isset($_POST['custom_theme_desc']) ? sanitize_text_field($_POST['custom_theme_desc']) : '';
         $api_key = get_option(self::OPTION_API_KEY, '');
+        $stripe_key = get_option(self::OPTION_STRIPE_KEY, '');
+
+        $pages_count = isset($_POST['pages_count']) ? intval($_POST['pages_count']) : 1;
+        $templates = isset($_POST['templates']) ? json_decode(stripslashes($_POST['templates']), true) : array();
+        if (!is_array($templates)) {
+            $templates = array();
+        }
 
         if (empty($api_key)) {
             wp_send_json_error(array('error' => __('Urgent: Please add your Google Gemini API Key first!', 'sabis-ai-studio')));
@@ -1134,14 +1665,73 @@ class Sabis_AI_Studio {
             $enhanced = $groq_enhancement;
         }
 
-        $system_instruction = "You are an elite, modern Web Designer and No-Code Tailwind CSS Master. Output ONLY clean, valid, standalone semantic HTML tags with inline Tailwind classes. Ensure the design follows requested accents theme correctly. Do NOT return markdown blocks or any conversational explanations.";
+        $stripe_prompt_addon = !empty($stripe_key) 
+            ? "CRITICAL NO-CODE PAYMENT ACTION: We have an active Stripe Publishable Key: '{$stripe_key}'. If checkout forms, pricing visual blocks, shopping carts, or digital payment features are requested or suited, you MUST automatically output a highly secure, functional, fully customized visual script layout utilizing official SDK libraries 'https://js.stripe.com/v3/' to render smart credit card payment fields dynamically. Avoid WooCommerce by handling transaction submissions directly via raw GrapesJS / Stripe JS routines using that key."
+            : "PAYMENT INTEGRATION WARNING: If payment fields are needed, render direct payment UI placeholders and mention Stripe publishable key setup within the settings.";
+
+        $system_instruction = "You are an elite, modern Web Designer and No-Code Tailwind CSS Master. Output ONLY clean, valid, standalone semantic HTML tags with inline Tailwind classes. Ensure the design follows requested accents theme correctly. Do NOT return markdown blocks or any conversational explanations. {$stripe_prompt_addon} 
+        The theme preset should match [ {$theme_preset} ].
+        Theme Profiles details list:
+        - 'Minimal Light': sleek off-whites (bg-zinc-50), subtle gray borders, elegant spacing.
+        - 'Cyberpunk Dark': neon elements, dark background (bg-slate-950), interactive glowing borders.
+        - 'Royal Gold': emerald/gold accents, opulent visual elegance (bg-slate-900).
+        - 'Sunset Orange & Charcoal': warm sunset gradient, vivid orange text accents, dark charcoal panels.
+        - 'Forest Emerald & Sage': earthy calm feel, natural deep greens and soft sage details.
+        - 'Deep Ocean Blues': tech navy backgrounds, beautiful marine teal elements.
+        - 'Dracula Vampire': dark gothic cyber themes, purple borders, magenta accents.
+        - 'Custom Accent': custom vibe described as: [ " . $custom_theme_desc . " ]. Formulate custom color gradients, backgrounds and cards directly matching this description.";
+
+        // Handle possible multimodal image reference attached to prompt
+        $parts = array();
+        if (isset($_POST['reference_image']) && !empty($_POST['reference_image'])) {
+            $image_base64 = $_POST['reference_image'];
+            $image_base64 = str_replace('data:image/png;base64,', '', $image_base64);
+            $image_base64 = str_replace('data:image/jpeg;base64,', '', $image_base64);
+            $image_base64 = str_replace('data:image/jpg;base64,', '', $image_base64);
+            $image_base64 = str_replace(' ', '+', $image_base64);
+
+            $parts[] = array(
+                'inlineData' => array(
+                    'mimeType' => 'image/png',
+                    'data' => $image_base64
+                )
+            );
+        }
+
+        // Add visual layout instruction suffix if reference image is active
+        $layout_target_prompt = "Design complete visual block styled for preset: [ " . $theme_preset . " ]. ";
+        if ($theme_preset === 'Custom Accent' && !empty($custom_theme_desc)) {
+            $layout_target_prompt .= "Follow custom theme details: \"" . $custom_theme_desc . "\". ";
+        }
+        if (isset($_POST['reference_image']) && !empty($_POST['reference_image'])) {
+            $layout_target_prompt .= "Analyze the attached screenshot/image carefully. Replicate its visual layout hierarchy, font weights, custom tailwind alignments, spacings, design patterns, and general UI vibes elegantly. ";
+        }
+
+        if ($pages_count > 1 || !empty($templates)) {
+            $layout_target_prompt .= "We are compiling a multiline/multi-page site structure. Create " . $pages_count . " separate complete page structures. The needed pages are defined as: " . implode(', ', $templates) . ". 
+            Since multiple pages are requested, you MUST return a valid JSON array of objects. Do NOT output raw standard HTML, write the final resulting objects list within a JSON structure.
+            Example of expected JSON return:
+            [
+              {
+                \"title\": \"Page Title 1 (e.g. Home)\",
+                \"html\": \"<section class='...'>Home Page content styled beautifully</section>\"
+              },
+              {
+                \"title\": \"Page Title 2\",
+                \"html\": \"<section class='...'>Detailed page grid...</section>\"
+              }
+            ]
+            Each HTML value must be independent, valid, stylized and fully populated with headers, sliders, forms or call-to-actions. Return raw JSON strictly without triple-backtick json frames.";
+        } else {
+            $layout_target_prompt .= "Instructions: " . $enhanced;
+        }
+
+        $parts[] = array('text' => $layout_target_prompt);
 
         $body_array = array(
             'contents' => array(
                 array(
-                    'parts' => array(
-                        array('text' => "Design complete block styled forpreset: [ " . $theme_preset . " ]. Instructions: " . $enhanced)
-                    )
+                    'parts' => $parts
                 )
             ),
             'systemInstruction' => array(
@@ -1155,7 +1745,7 @@ class Sabis_AI_Studio {
         $response = wp_remote_post($endpoint, array(
             'headers' => array('Content-Type' => 'application/json'),
             'body' => wp_json_encode($body_array),
-            'timeout' => 30
+            'timeout' => 45
         ));
 
         if (is_wp_error($response)) {
@@ -1164,8 +1754,31 @@ class Sabis_AI_Studio {
 
         $res_body = json_decode(wp_remote_retrieve_body($response), true);
         if (isset($res_body['candidates'][0]['content']['parts'][0]['text'])) {
-            $html = $this->clean_markdown_html($res_body['candidates'][0]['content']['parts'][0]['text']);
-            wp_send_json_success(array('html' => $html));
+            $raw_text = $this->clean_markdown_html($res_body['candidates'][0]['content']['parts'][0]['text']);
+            
+            // Attempt to parse is JSON array
+            $decoded_pages = json_decode($raw_text, true);
+            if ($pages_count > 1 && is_array($decoded_pages)) {
+                $mapped = array_map(function($p) {
+                    if (isset($p['html'])) {
+                        $p['html'] = $this->apply_isolate_wrapper($p['html']);
+                    }
+                    return $p;
+                }, $decoded_pages);
+                wp_send_json_success(array('pages' => $mapped));
+            } else {
+                if (is_array($decoded_pages) && isset($decoded_pages[0]['html'])) {
+                    $mapped = array_map(function($p) {
+                        if (isset($p['html'])) {
+                            $p['html'] = $this->apply_isolate_wrapper($p['html']);
+                        }
+                        return $p;
+                    }, $decoded_pages);
+                    wp_send_json_success(array('pages' => $mapped));
+                } else {
+                    wp_send_json_success(array('html' => $this->apply_isolate_wrapper($raw_text)));
+                }
+            }
         } else {
             wp_send_json_error(array('error' => __('Verification: Call returned no components from Gemini API.', 'sabis-ai-studio')));
         }
@@ -1173,13 +1786,21 @@ class Sabis_AI_Studio {
 
     public function copywrite_via_gemini_ajax() {
         check_ajax_referer('sabis_copywrite_nonce', 'nonce');
+        if (!current_user_can('edit_pages')) {
+            wp_send_json_error(array('error' => __('Permissions error.', 'sabis-ai-studio')));
+        }
         $text = sanitize_textarea_field($_POST['text']);
         $command = sanitize_text_field($_POST['command']);
 
-        $res = $this->call_groq(
-            "You are an expert SaaS copywriter. Transform the given text with action: " . $command . ". Return back ONLY rewritten string with zero explanation or quotes.",
-            "Transform text: " . $text
-        );
+        $system_prompt = "You are an expert SaaS copywriter. Transform the given text with action: " . $command . ". Return back ONLY rewritten string with zero explanation or quotes.";
+        $user_prompt = "Transform text: " . $text;
+
+        $res = $this->call_groq($system_prompt, $user_prompt);
+
+        if (is_wp_error($res)) {
+            // Failsafe auto-fallback routing to Google Gemini on Groq error/absence
+            $res = $this->call_gemini($system_prompt, $user_prompt);
+        }
 
         if (is_wp_error($res)) {
             wp_send_json_error(array('error' => $res->get_error_message()));
@@ -1192,12 +1813,20 @@ class Sabis_AI_Studio {
 
     public function translate_via_gemini_ajax() {
         check_ajax_referer('sabis_translate_nonce', 'nonce');
+        if (!current_user_can('edit_pages')) {
+            wp_send_json_error(array('error' => __('Permissions error.', 'sabis-ai-studio')));
+        }
         $text = $_POST['text'];
 
-        $res = $this->call_groq(
-            "You are a localization module. Translate leaf text nodes from English to exquisite marketing Urdu. You MUST isolate leaf nodes, leaving 100% of Tailwind classes and HTML tag bracket properties strictly unchanged.",
-            $text
-        );
+        $system_prompt = "You are a localization module. Translate leaf text nodes from English to exquisite marketing Urdu. You MUST isolate leaf nodes, leaving 100% of Tailwind classes and HTML tag bracket properties strictly unchanged.";
+        $user_prompt = $text;
+
+        $res = $this->call_groq($system_prompt, $user_prompt);
+
+        if (is_wp_error($res)) {
+            // Failsafe auto-fallback routing to Google Gemini on Groq error/absence
+            $res = $this->call_gemini($system_prompt, $user_prompt);
+        }
 
         if (is_wp_error($res)) {
             wp_send_json_error(array('error' => $res->get_error_message()));
@@ -1209,6 +1838,9 @@ class Sabis_AI_Studio {
 
     public function screenshot_to_code_ajax() {
         check_ajax_referer('sabis_vision_nonce', 'nonce');
+        if (!current_user_can('edit_pages')) {
+            wp_send_json_error(array('error' => __('Permissions error.', 'sabis-ai-studio')));
+        }
         $image = $_POST['image'];
         $theme = sanitize_text_field($_POST['theme']);
         $api_key = get_option(self::OPTION_API_KEY, '');
@@ -1262,10 +1894,18 @@ class Sabis_AI_Studio {
 
     public function generate_component_ajax() {
         check_ajax_referer('sabis_comp_nonce', 'nonce');
+        if (!current_user_can('edit_pages')) {
+            wp_send_json_error(array('error' => __('Permissions error.', 'sabis-ai-studio')));
+        }
         $prompt = sanitize_textarea_field($_POST['prompt']);
+        $stripe_key = get_option(self::OPTION_STRIPE_KEY, '');
+
+        $stripe_prompt_addon = !empty($stripe_key) 
+            ? "CRITICAL NO-CODE PAYMENT ACTION: We have an active Stripe Publishable Key: '{$stripe_key}'. If the custom widget/component requested implies credit card inputs, pricing sliders, checkouts, or purchasing, you MUST automatically inject direct Stripe Smart Payment Elements. Load https://js.stripe.com/v3/ inside a script block, set up Stripe with key '{$stripe_key}', render fields, and handle click/submit callbacks elegantly to complete standalone transactions without WooCommerce."
+            : "PAYMENT INTEGRATION: If payment is requested, construct a clean PayPal SDK or mock Stripe Elements button showing a detailed description on how to plug in Stripe keys.";
 
         $res = $this->call_groq(
-            "You are a premium UI widget generator. Compile vanilla semantic HTML paired with lightweight CSS/vanilla javascript inside script tags or Alpine.js. Do not translate or discuss, return ONLY complete component code with zero markdown wrapping blocks.",
+            "You are a premium UI widget generator. Compile vanilla semantic HTML paired with lightweight CSS/vanilla javascript inside script tags or Alpine.js. Do not translate or discuss, return ONLY complete component code with zero markdown wrapping blocks. {$stripe_prompt_addon}",
             "Generate layout: " . $prompt
         );
 
@@ -1292,8 +1932,194 @@ class Sabis_AI_Studio {
         return is_array($decoded) ? $decoded : array();
     }
 
+    private function optimize_and_minify_html($html, $prompt_hint = '') {
+        // Strip out temporary inline HTML/comment nodes: <!-- ... -->
+        $html = preg_replace('/<!--(.*?)-->/is', '', $html);
+
+        // Strip excessive whitespace characters but preserve correct tag formatting
+        $html = preg_replace('/\s+/', ' ', $html);
+        $html = preg_replace('/>\s+</', '><', $html);
+        $html = preg_replace('/ +/', ' ', $html);
+        $html = preg_replace('/\s*=\s*/', '=', $html);
+
+        // Process images with missing/empty src attributes, or placeholder src targets
+        $category = 'minimalist';
+        if (!empty($prompt_hint)) {
+            $prompt_lower = strtolower($prompt_hint);
+            if (strpos($prompt_lower, 'coffee') !== false || strpos($prompt_lower, 'cafe') !== false) {
+                $category = 'coffee';
+            } elseif (strpos($prompt_lower, 'tech') !== false || strpos($prompt_lower, 'saas') !== false || strpos($prompt_lower, 'software') !== false || strpos($prompt_lower, 'developer') !== false) {
+                $category = 'technology';
+            } elseif (strpos($prompt_lower, 'portfolio') !== false || strpos($prompt_lower, 'design') !== false || strpos($prompt_lower, 'creative') !== false) {
+                $category = 'design';
+            } elseif (strpos($prompt_lower, 'store') !== false || strpos($prompt_lower, 'shop') !== false || strpos($prompt_lower, 'commerce') !== false) {
+                $category = 'shopping';
+            } elseif (strpos($prompt_lower, 'agency') !== false || strpos($prompt_lower, 'corporate') !== false || strpos($prompt_lower, 'business') !== false) {
+                $category = 'business';
+            }
+        }
+
+        $html = preg_replace_callback('/<img\s([^>]*?)>/is', function($matches) use ($category) {
+            $attrs = $matches[1];
+            
+            $has_src = preg_match('/src=[\'"]([^\'"]*?)[\'"]/i', $attrs, $src_matches);
+            $needs_placeholder = false;
+            if (!$has_src) {
+                $needs_placeholder = true;
+            } else {
+                $src_val = trim($src_matches[1]);
+                if (empty($src_val) || $src_val === '#' || strpos($src_val, 'placeholder') !== false || strpos($src_val, 'via.placeholder') !== false) {
+                    $needs_placeholder = true;
+                }
+            }
+
+            if ($needs_placeholder) {
+                $rand_photo_id = rand(100, 999);
+                $unsplash_url = "https://images.unsplash.com/photo-" . ($rand_photo_id == 150 ? '1500000000000' : '1507525428034b') . "?auto=format&fit=crop&w=1200&q=80&sig=" . $rand_photo_id . "&q=" . urlencode($category);
+                
+                if ($has_src) {
+                    $attrs = preg_replace('/src=[\'"]([^\'"]*?)[\'"]/i', 'src="' . $unsplash_url . '"', $attrs);
+                } else {
+                    $attrs .= ' src="' . $unsplash_url . '"';
+                }
+            }
+            
+            return '<img ' . trim($attrs) . '>';
+        }, $html);
+
+        return trim($html);
+    }
+
+    private function generate_vector_favicon_svg($prompt_hint = '') {
+        $color_start = '#3b82f6';
+        $color_end = '#1d4ed8';
+        $letter = 'S';
+
+        if (!empty($prompt_hint)) {
+            $prompt_lower = strtolower($prompt_hint);
+            $words = preg_split('/\s+/', trim($prompt_hint));
+            if (count($words) > 0 && !empty($words[0])) {
+                $letter = strtoupper(substr($words[0], 0, 1));
+            }
+            if (strpos($prompt_lower, 'coffee') !== false || strpos($prompt_lower, 'cafe') !== false) {
+                $color_start = '#f59e0b';
+                $color_end = '#78350f';
+                $letter = '☕';
+            } elseif (strpos($prompt_lower, 'store') !== false || strpos($prompt_lower, 'shop') !== false || strpos($prompt_lower, 'checkout') !== false) {
+                $color_start = '#10b981';
+                $color_end = '#065f46';
+                $letter = '🛒';
+            } elseif (strpos($prompt_lower, 'tech') !== false || strpos($prompt_lower, 'saas') !== false || strpos($prompt_lower, 'software') !== false) {
+                $color_start = '#3b82f6';
+                $color_end = '#1e3a8a';
+                $letter = '⚡';
+            } elseif (strpos($prompt_lower, 'portfolio') !== false || strpos($prompt_lower, 'design') !== false) {
+                $color_start = '#ec4899';
+                $color_end = '#9d174d';
+                $letter = '🎨';
+            } elseif (strpos($prompt_lower, 'restaurant') !== false || strpos($prompt_lower, 'food') !== false) {
+                $color_start = '#ef4444';
+                $color_end = '#991b1b';
+                $letter = '🍽️';
+            }
+        }
+
+        $svg = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">';
+        $svg .= '<defs>';
+        $svg .= '<linearGradient id="favGrad" x1="0%" y1="0%" x2="100%" y2="100%">';
+        $svg .= '<stop offset="0%" stop-color="' . $color_start . '" />';
+        $svg .= '<stop offset="100%" stop-color="' . $color_end . '" />';
+        $svg .= '</linearGradient>';
+        $svg .= '</defs>';
+        $svg .= '<circle cx="50" cy="50" r="46" fill="url(#favGrad)" stroke="rgba(255,255,255,0.15)" stroke-width="4" />';
+        if (mb_strlen($letter, 'UTF-8') === 1 && !preg_match('/[\x{1F300}-\x{1F6FF}]/u', $letter)) {
+            $svg .= '<text x="50" y="65" font-family="\'Inter\', sans-serif" font-weight="900" font-size="44" fill="#ffffff" text-anchor="middle" dominant-baseline="middle">' . $letter . '</text>';
+        } else {
+            $svg .= '<text x="50" y="58" font-size="44" text-anchor="middle" dominant-baseline="middle">' . $letter . '</text>';
+        }
+        $svg .= '</svg>';
+
+        return 'data:image/svg+xml;base64,' . base64_encode($svg);
+    }
+
     public function publish_visual_page_ajax() {
         check_ajax_referer('sabis_publish_nonce', 'nonce');
+        if (!current_user_can('edit_pages')) {
+            wp_send_json_error(array('error' => __('Permissions error.', 'sabis-ai-studio')));
+        }
+
+        if (isset($_POST['pages'])) {
+            $pages = json_decode(stripslashes($_POST['pages']), true);
+            if (is_array($pages)) {
+                $published = array();
+                $audit = "Server-side self-healing log: Multi-page mass publication started.";
+                foreach ($pages as $p) {
+                    $p_title = sanitize_text_field($p['title']);
+                    $p_html = $p['html'];
+                    
+                    // Self-healing div checks for each page
+                    $opens = substr_count($p_html, '<div');
+                    $closes = substr_count($p_html, '</div>');
+                    if ($opens > $closes) {
+                        $p_html .= str_repeat('</div>', $opens - $closes);
+                    }
+                    
+                    // Run minifier & placeholders injection
+                    $p_html = $this->optimize_and_minify_html($p_html, $p_title);
+                    $favicon_uri = $this->generate_vector_favicon_svg($p_title);
+
+                    $seo_meta_title = $p_title;
+                    $seo_meta_desc = "";
+                    $json_ld = "";
+                    
+                    $seo = $this->generate_seo_meta($p_html);
+                    if (!empty($seo)) {
+                        $seo_meta_title = isset($seo['meta_title']) ? sanitize_text_field($seo['meta_title']) : $p_title;
+                        $seo_meta_desc = isset($seo['meta_description']) ? sanitize_text_field($seo['meta_description']) : "";
+                        $json_ld = isset($seo['json_ld']) ? $seo['json_ld'] : "";
+                        if (is_array($json_ld)) {
+                            $json_ld = wp_json_encode($json_ld, JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
+                        }
+                    }
+                    
+                    $sanitized_html = wp_kses_post($p_html);
+                    $final_content = "
+                        <div class='sabis-canvas-body-wrap' style='all: unset;'>
+                            <link rel='shortcut icon' href='" . $favicon_uri . "' type='image/svg+xml'>
+                            <script src='https://cdn.tailwindcss.com'></script>
+                            " . $sanitized_html . "
+                        </div>
+                    ";
+                    if (!empty($json_ld)) {
+                        $final_content .= "\n<script type=\"application/ld+json\">\n" . $json_ld . "\n</script>";
+                    }
+                    
+                    $post_id = wp_insert_post(array(
+                        'post_title' => $p_title,
+                        'post_content' => $final_content,
+                        'post_status' => 'publish',
+                        'post_type' => 'page',
+                    ));
+                    
+                    if (!is_wp_error($post_id)) {
+                        update_post_meta($post_id, '_sabis_meta_title', $seo_meta_title);
+                        update_post_meta($post_id, '_sabis_meta_desc', $seo_meta_desc);
+                        update_post_meta($post_id, '_sabis_json_ld_schema', $json_ld);
+                        $published[] = array(
+                            'title' => $p_title,
+                            'permalink' => get_permalink($post_id)
+                        );
+                    }
+                }
+                wp_send_json_success(array(
+                    'multi' => true,
+                    'pages' => $published,
+                    'audit' => $audit . " Successfully published " . count($published) . " pages."
+                ));
+                return;
+            }
+        }
+
         $html = $_POST['html'];
         $title = sanitize_text_field($_POST['title']);
 
@@ -1309,6 +2135,10 @@ class Sabis_AI_Studio {
             $html .= str_repeat('</div>', $opens - $closes);
             $audit .= " Restructured and healed with balanced tags.";
         }
+
+        // Run minifier & placeholders injection
+        $html = $this->optimize_and_minify_html($html, $title);
+        $favicon_uri = $this->generate_vector_favicon_svg($title);
 
         // 1-Click AI SEO parameters generation (Groq Llama 3)
         $meta_title = $title;
@@ -1328,6 +2158,7 @@ class Sabis_AI_Studio {
         $sanitized_html = wp_kses_post($html);
         $final_content = "
             <div class='sabis-canvas-body-wrap' style='all: unset;'>
+                <link rel='shortcut icon' href='" . $favicon_uri . "' type='image/svg+xml'>
                 <script src='https://cdn.tailwindcss.com'></script>
                 " . $sanitized_html . "
             </div>
@@ -1364,16 +2195,24 @@ class Sabis_AI_Studio {
 
     public function regenerate_section_via_gemini_ajax() {
         check_ajax_referer('sabis_regenerate_section_nonce', 'nonce');
+        if (!current_user_can('edit_pages')) {
+            wp_send_json_error(array('error' => __('Permissions error.', 'sabis-ai-studio')));
+        }
         $section_html = $_POST['section_html'];
         $instruction = sanitize_textarea_field($_POST['instruction']);
         $theme_preset = sanitize_text_field($_POST['theme']);
         $api_key = get_option(self::OPTION_API_KEY, '');
+        $stripe_key = get_option(self::OPTION_STRIPE_KEY, '');
 
         if (empty($api_key)) {
             wp_send_json_error(array('error' => __('Missing API Key', 'sabis-ai-studio')));
         }
 
-        $system_instruction = "You are an elite Tailwind master. Redesign the raw block provided according to instruction. Output ONLY valid pure HTML/Tailwind CSS tags matching preset: " . $theme_preset . ". Do not write markdown blocks or explain.";
+        $stripe_prompt_addon = !empty($stripe_key) 
+            ? "We have an active Stripe Publishable Key: '{$stripe_key}'. If checkout/payment features are being updated, bind this key '{$stripe_key}' securely using Stripe Elements or Stripe Checkout scripting."
+            : "";
+
+        $system_instruction = "You are an elite Tailwind master. Redesign the raw block provided according to instruction. Output ONLY valid pure HTML/Tailwind CSS tags matching preset: " . $theme_preset . ". {$stripe_prompt_addon} Do not write markdown blocks or explain.";
         $body = array(
             'contents' => array(
                 array(
@@ -1403,10 +2242,43 @@ class Sabis_AI_Studio {
         $res_body = json_decode(wp_remote_retrieve_body($response), true);
         if (isset($res_body['candidates'][0]['content']['parts'][0]['text'])) {
             $html = $this->clean_markdown_html($res_body['candidates'][0]['content']['parts'][0]['text']);
+            $html = $this->apply_isolate_wrapper($html);
             wp_send_json_success(array('html' => $html));
         } else {
             wp_send_json_error(array('error' => __('Error contacting Gemini API.', 'sabis-ai-studio')));
         }
+    }
+
+    public function get_wordpress_page_ajax() {
+        check_ajax_referer('sabis_get_page_nonce', 'nonce');
+        if (!current_user_can('edit_pages')) {
+            wp_send_json_error(array('error' => __('Permissions error.', 'sabis-ai-studio')));
+        }
+        $page_id = isset($_POST['page_id']) ? intval($_POST['page_id']) : 0;
+        if (!$page_id) {
+            wp_send_json_error(array('error' => __('Invalid page ID.', 'sabis-ai-studio')));
+        }
+        $post = get_post($page_id);
+        if (!$post || $post->post_type !== 'page') {
+            wp_send_json_error(array('error' => __('Page not found.', 'sabis-ai-studio')));
+        }
+
+        $content = $post->post_content;
+
+        // Try to locate the sabis-canvas-body-wrap element content
+        $html = '';
+        if (preg_match('/<div class=[\'"]sabis-canvas-body-wrap[\'"][^>]*>(.*?)<\/div>/is', $content, $matches)) {
+            $html = trim($matches[1]);
+            // Remove Tailwind script tag if included in matches to keep it clean
+            $html = preg_replace('/<script[^>]*src=[\'"]https:\/\/cdn\.tailwindcss\.com[\'"][^>]*><\/script>/is', '', $html);
+        } else {
+            $html = trim($content);
+        }
+
+        wp_send_json_success(array(
+            'html' => $html,
+            'title' => $post->post_title
+        ));
     }
 
     public function render_section_shortcode($atts) {
@@ -1423,8 +2295,16 @@ class Sabis_AI_Studio {
     }
 
     public function save_section_block_ajax() {
+        check_ajax_referer('sabis_publish_nonce', 'nonce');
+        if (!current_user_can('edit_pages')) {
+            wp_send_json_error(array('error' => __('Permissions error.', 'sabis-ai-studio')));
+        }
         $html = $_POST['html'];
         $title = sanitize_text_field($_POST['title']);
+
+        // Optimize and minify block HTML before insertion to database
+        $html = $this->optimize_and_minify_html($html, $title);
+
         $id = wp_insert_post(array(
             'post_title' => $title,
             'post_content' => $html,
@@ -1507,6 +2387,134 @@ class Sabis_AI_Studio {
             }
         }
         return $file;
+    }
+
+    public function add_sabis_row_actions($actions, $post) {
+        if (current_user_can('edit_pages') && in_array($post->post_type, array('page', 'post', 'sabis_section'))) {
+            $link = admin_url('admin.php?page=sabis-ai-studio&sabis_edit_page=' . $post->ID);
+            $actions['sabis_edit'] = '<a href="' . esc_url($link) . '" style="color:#8b5cf6; font-weight:bold; text-shadow:0 0 1px rgba(139,92,246,0.1);">✨ Edit with Sabis AI Studio</a>';
+        }
+        return $actions;
+    }
+
+    public function add_sabis_admin_bar_menu($wp_admin_bar) {
+        if (!current_user_can('edit_pages')) {
+            return;
+        }
+
+        $post_id = 0;
+        if (is_admin()) {
+            global $pagenow;
+            if ('post.php' === $pagenow && isset($_GET['post'])) {
+                $post_id = intval($_GET['post']);
+            }
+        } else {
+            if (is_singular()) {
+                $post_id = get_the_ID();
+            }
+        }
+
+        $url = admin_url('admin.php?page=sabis-ai-studio');
+        if ($post_id > 0) {
+            $url = admin_url('admin.php?page=sabis-ai-studio&sabis_edit_page=' . $post_id);
+        }
+
+        $wp_admin_bar->add_node(array(
+            'id'    => 'sabis-ai-studio-shortcut',
+            'title' => '<span class="ab-icon dashicons dashicons-superhero" style="color:#facc15;"></span> <span style="font-weight:700; color:#fff;">🚀 Edit with Sabis AI Studio</span>',
+            'href'  => $url,
+            'meta'  => array(
+                'title' => __('Edit current template inside the design canvas', 'sabis-ai-studio')
+            )
+        ));
+    }
+
+    public function inject_gutenberg_sabis_buttons() {
+        global $pagenow;
+        if (!in_array($pagenow, array('post.php', 'post-new.php'))) {
+            return;
+        }
+
+        $post_id = isset($_GET['post']) ? intval($_GET['post']) : 0;
+        $url = admin_url('admin.php?page=sabis-ai-studio');
+        if ($post_id > 0) {
+            $url = admin_url('admin.php?page=sabis-ai-studio&sabis_edit_page=' . $post_id);
+        }
+
+        ?>
+        <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const checkGutenbergHeader = setInterval(function() {
+                const editPostHeader = document.querySelector('.edit-post-header__settings') || document.querySelector('.interface-interface-skeleton__header');
+                if (editPostHeader) {
+                    clearInterval(checkGutenbergHeader);
+                    
+                    if (document.getElementById('sabis-gutenberg-shortcut')) return;
+                    
+                    const button = document.createElement('button');
+                    button.id = 'sabis-gutenberg-shortcut';
+                    button.type = 'button';
+                    button.className = 'components-button is-primary';
+                    button.style.backgroundColor = '#8b5cf6';
+                    button.style.borderColor = '#8b5cf6';
+                    button.style.fontWeight = 'bold';
+                    button.style.color = '#fff';
+                    button.style.borderRadius = '6px';
+                    button.style.marginLeft = '10px';
+                    button.style.marginRight = '10px';
+                    button.style.display = 'inline-flex';
+                    button.style.alignItems = 'center';
+                    button.style.gap = '6px';
+                    button.style.height = '32px';
+                    button.style.padding = '0 12px';
+                    button.innerHTML = '🚀 Edit with Sabis AI Studio';
+                    
+                    button.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        const wpEditorSaveBtn = document.querySelector('.editor-post-publish-button__button') || document.querySelector('.editor-post-save-draft');
+                        if (wpEditorSaveBtn) {
+                            wpEditorSaveBtn.click();
+                        }
+                        setTimeout(function() {
+                            window.location.href = "<?php echo esc_js($url); ?>";
+                        }, 600);
+                    });
+                    
+                    editPostHeader.insertBefore(button, editPostHeader.firstChild);
+                }
+            }, 500);
+
+            const classicTitle = document.getElementById('titlediv');
+            if (classicTitle && !document.getElementById('sabis-classic-shortcut')) {
+                const link = document.createElement('a');
+                link.id = 'sabis-classic-shortcut';
+                link.href = "<?php echo esc_js($url); ?>";
+                link.className = 'button button-primary button-large';
+                link.style.backgroundColor = '#8b5cf6';
+                link.style.borderColor = '#7c3aed';
+                link.style.color = '#fff';
+                link.style.fontWeight = 'bold';
+                link.style.marginLeft = '10px';
+                link.style.display = 'inline-block';
+                link.style.verticalAlign = 'middle';
+                link.innerHTML = '🚀 Edit with Sabis AI Studio';
+                
+                link.addEventListener('click', function(e) {
+                    const saveDraftBtn = document.getElementById('save-post');
+                    if (saveDraftBtn) {
+                        e.preventDefault();
+                        saveDraftBtn.click();
+                        setTimeout(function() {
+                            window.location.href = "<?php echo esc_js($url); ?>";
+                        }, 900);
+                    }
+                });
+
+                classicTitle.appendChild(link);
+            }
+        });
+        </script>
+        <?php
     }
 }
 

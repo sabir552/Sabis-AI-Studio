@@ -1,1 +1,84 @@
 @import "tailwindcss";
+
+.gjs-frame {
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+/* Core styling overrides for GrapesJS toolbar items to prevent any truncation */
+.gjs-toolbar {
+  opacity: 1 !important;
+  transform: none !important;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
+  width: auto !important;
+  flex-wrap: nowrap !important;
+  max-width: none !important;
+  background-color: rgba(30, 41, 59, 0.98) !important;
+  border: 1px solid rgba(255, 255, 255, 0.15) !important;
+  border-radius: 8px !important;
+  padding: 4px !important;
+  gap: 4px !important;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5) !important;
+  overflow: visible !important;
+  z-index: 9999 !important;
+}
+
+#sabis-btn-ai-redesign, .sabis-gjs-ai-btn {
+  position: absolute !important;
+  bottom: calc(100% + 8px) !important;
+  left: 0 !important;
+  width: max-content !important;
+  max-width: 130px !important;
+  display: inline-flex !important;
+  padding: 4px 10px !important;
+  z-index: 999999 !important;
+  font-size: 11px !important;
+  background-color: #3b82f6 !important; /* Premium Elegant Blue */
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  border-radius: 6px !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 4px !important;
+  height: 28px !important;
+  line-height: 28px !important;
+  transition: all 0.2s ease-in-out !important;
+  box-shadow: 0 4px 10px rgba(59, 130, 246, 0.4) !important;
+  white-space: nowrap !important;
+}
+
+#sabis-btn-ai-redesign:hover, .sabis-gjs-ai-btn:hover {
+  background-color: #2563eb !important;
+  transform: scale(1.04) !important;
+  box-shadow: 0 6px 14px rgba(37, 99, 235, 0.5) !important;
+}
+
+/* Prevent horizontal overflow on GrapesJS iframe workspace and canvas container */
+#gjs-wrapper {
+  max-width: 100vw !important;
+  overflow-x: hidden !important;
+  box-sizing: border-box !important;
+}
+
+.gjs-cv-canvas {
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+/* Responsive screen padding protection and global viewport lockdown */
+html, body {
+  max-width: 100vw !important;
+  overflow-x: hidden !important;
+}
+
+*, ::before, ::after {
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .p-28 {
+    padding: 12px !important;
+  }
+}
